@@ -1,0 +1,19 @@
+[Unit]
+Description=LilyCam - web xem camera cua hang (Rust)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGE_ME
+Group=CHANGE_ME
+WorkingDirectory=/duong/dan/toi/lilycam
+Environment=PORT=8790
+ExecStart=/duong/dan/toi/lilycam/lilycam
+Restart=always
+RestartSec=3
+StandardOutput=append:/duong/dan/toi/lilycam/server.log
+StandardError=append:/duong/dan/toi/lilycam/server.log
+
+[Install]
+WantedBy=multi-user.target

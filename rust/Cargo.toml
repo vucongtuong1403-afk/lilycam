@@ -1,0 +1,22 @@
+[package]
+name = "lilycam"
+version = "0.1.0"
+edition = "2021"
+description = "LilyCam — web xem camera các cửa hàng (bản Rust)"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "process", "time", "sync", "io-util", "signal"] }
+axum = { version = "0.8", features = ["http1", "tokio", "query"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hmac = "0.12"
+scrypt = "0.11"
+base64 = "0.22"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
+percent-encoding = "2"
+
+[profile.release]
+opt-level = 2
+lto = "thin"

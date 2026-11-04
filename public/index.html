@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0d12">
+<title>LilyCam — Camera cửa hàng</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css?v=20261104i">
+</head>
+<body>
+
+<!-- ============ ĐĂNG NHẬP ============ -->
+<div class="auth" id="auth" hidden>
+  <form class="auth-card" id="loginForm" autocomplete="on">
+    <div class="brand brand-lg">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.9c.6 0 1.1.3 1.5.8l.7 1a2 2 0 0 0 1.6.8h3.6a2 2 0 0 0 1.6-.8l.7-1c.4-.5.9-.8 1.5-.8h1.9A2.5 2.5 0 0 1 21 8.5v7A2.5 2.5 0 0 1 18.5 18h-13A2.5 2.5 0 0 1 3 15.5v-7Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      </span>
+      <span class="brand-text">Lily<em>Cam</em></span>
+    </div>
+    <p class="auth-sub">Hệ thống camera nội bộ — đăng nhập để tiếp tục</p>
+    <label class="field">
+      <span>Tên đăng nhập</span>
+      <input name="username" value="admin" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    </label>
+    <label class="field">
+      <span>Mật khẩu</span>
+      <input name="password" type="password" autocomplete="current-password" required autofocus>
+    </label>
+    <button class="btn btn-primary btn-block" type="submit">Đăng nhập</button>
+    <p class="auth-error" id="loginError" role="alert"></p>
+  </form>
+</div>
+
+<!-- ============ ỨNG DỤNG ============ -->
+<div class="app" id="app" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.9c.6 0 1.1.3 1.5.8l.7 1a2 2 0 0 0 1.6.8h3.6a2 2 0 0 0 1.6-.8l.7-1c.4-.5.9-.8 1.5-.8h1.9A2.5 2.5 0 0 1 21 8.5v7A2.5 2.5 0 0 1 18.5 18h-13A2.5 2.5 0 0 1 3 15.5v-7Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      </span>
+      <span class="brand-text">Lily<em>Cam</em></span>
+    </div>
+
+    <button class="btn btn-icon menu-btn" id="menuBtn" title="Danh sách cửa hàng" aria-label="Danh sách cửa hàng">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+
+    <label class="search">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <input id="search" type="search" placeholder="Tìm cửa hàng, địa chỉ…" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="top-actions">
+      <button class="btn btn-ghost" id="refreshAll" title="Kiểm tra kết nối tất cả cơ sở">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="hide-sm">Kiểm tra</span>
+      </button>
+      <div class="user-menu">
+        <button class="user-chip" id="userBtn" aria-haspopup="menu" aria-expanded="false">
+          <span class="avatar" id="avatar">A</span>
+          <span class="hide-sm" id="userName">admin</span>
+        </button>
+        <div class="menu" id="userMenu" role="menu" hidden>
+          <button class="menu-item" id="openPwd" role="menuitem">Đổi mật khẩu</button>
+          <button class="menu-item" id="syncInfo" role="menuitem">Nguồn dữ liệu</button>
+          <button class="menu-item danger" id="logout" role="menuitem">Đăng xuất</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="filter-chips" id="filters">
+          <button class="chip is-active" data-unit="all">Tất cả</button>
+          <button class="chip" data-unit="Cửa hàng">Cửa hàng</button>
+          <button class="chip" data-unit="Văn phòng">Văn phòng</button>
+          <button class="chip" data-unit="Kho tổng">Kho</button>
+        </div>
+        <div class="sidebar-meta"><span id="storeCount">0 cơ sở</span><span id="onlineCount"></span></div>
+      </div>
+      <ul class="store-list" id="storeList"></ul>
+    </aside>
+
+    <section class="content" id="content">
+      <div class="empty-state" id="emptyState">
+        <svg viewBox="0 0 24 24" width="42" height="42" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.9c.6 0 1.1.3 1.5.8l.7 1a2 2 0 0 0 1.6.8h3.6a2 2 0 0 0 1.6-.8l.7-1c.4-.5.9-.8 1.5-.8h1.9A2.5 2.5 0 0 1 21 8.5v7A2.5 2.5 0 0 1 18.5 18h-13A2.5 2.5 0 0 1 3 15.5v-7Z" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        <h2>Chọn một cửa hàng</h2>
+        <p>Danh sách camera của cửa hàng sẽ hiện ở đây. Bấm vào ô camera để xem trực tiếp.</p>
+      </div>
+
+      <div class="store-view" id="storeView" hidden>
+        <div class="store-head">
+          <div class="store-title">
+            <button class="btn btn-icon back-btn" id="backBtn" title="Danh sách">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div>
+              <h1 id="storeName">—</h1>
+              <div class="store-sub">
+                <span class="tag" id="storeUnit">—</span>
+                <span id="storeCamCount"></span>
+                <span class="dot-sep"></span>
+                <span class="status-text" id="storeStatus">—</span>
+              </div>
+            </div>
+          </div>
+          <div class="store-tools">
+            <button class="btn btn-ghost raw-toggle" id="rawToggle" title="Xem luồng gốc, không qua xử lý (chỉ đầu ghi H.264)">
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 12a8 8 0 0 1 8-8m8 8a8 8 0 0 1-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+              <span class="hide-sm">Gốc</span>
+            </button>
+            <div class="layout-pick" id="layoutPick" role="group" aria-label="Số camera hiển thị">
+              <button data-l="2" title="2 camera">2</button>
+              <button data-l="4" title="4 camera">4</button>
+              <button data-l="6" title="6 camera">6</button>
+              <button data-l="8" title="8 camera">8</button>
+              <button data-l="10" title="10 camera">10</button>
+            </div>
+            <button class="btn btn-soft" id="liveAll">
+              <span class="live-dot"></span> Xem tất cả
+            </button>
+            <a class="btn btn-soft" id="dvrLink" target="_blank" rel="noopener">
+              Mở đầu ghi
+              <svg viewBox="0 0 24 24" width="14" height="14"><path d="M14 5h5v5M19 5l-8 8M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <button class="btn btn-icon" id="editStore" title="Sửa thông tin kết nối">
+              <svg viewBox="0 0 24 24" width="17" height="17"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="offline-panel" id="offlinePanel" hidden>
+          <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 9v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17" r="1.1" fill="currentColor"/></svg>
+          <div>
+            <strong>Chưa kết nối được đầu ghi của cơ sở này</strong>
+            <p id="offlineMsg">Kiểm tra DDNS / cổng forward, hoặc cập nhật lại địa chỉ trong nút bút chì.</p>
+          </div>
+          <button class="btn btn-soft" id="retryStore">Thử lại</button>
+        </div>
+        <div class="cam-grid" id="camGrid" data-layout="4"></div>
+        <div class="pager" id="pager" hidden>
+          <button class="btn btn-icon" id="prevPage" title="Trang trước">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span id="pageInfo">Trang 1/1</span>
+          <button class="btn btn-icon" id="nextPage" title="Trang sau">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ XEM TRỰC TIẾP ============ -->
+<div class="viewer" id="viewer" hidden>
+  <div class="viewer-backdrop" data-close></div>
+  <div class="viewer-panel" role="dialog" aria-modal="true" aria-label="Xem camera trực tiếp">
+    <header class="viewer-head">
+      <div class="viewer-title">
+        <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+        <div>
+          <strong id="viewerCam">CAM 1</strong>
+          <span id="viewerStore">—</span>
+        </div>
+      </div>
+      <div class="viewer-tools">
+        <button class="btn btn-icon" id="zoomBtn" title="Kính lúp: phóng to / thu nhỏ (Z)" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m15.5 15.5 4.4 4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10.8 8.1v5.4M8.1 10.8h5.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <button class="btn btn-icon" id="ptzBtn" title="Điều khiển PTZ (T)">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 4v4.6M12 15.4V20M4 12h4.6M15.4 12H20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="m10.2 6 1.8-1.8L13.8 6M10.2 18l1.8 1.8L13.8 18M6 10.2 4.2 12 6 13.8M18 10.2 19.8 12 18 13.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="btn btn-icon" id="zoneBtn" title="Vẽ vùng cảnh báo (G)">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="3.4" y="4.6" width="17.2" height="14.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.6 2.2"/><path d="M9.1 4.6v14.8M14.9 4.6v14.8M3.4 9.5h17.2M3.4 14.5h17.2" fill="none" stroke="currentColor" stroke-width="1" opacity=".65"/></svg>
+        </button>
+        <button class="btn btn-icon" id="pbBtn" title="Xem lại bản ghi (P)">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+        <button class="btn btn-icon sound-btn" id="soundBtn" title="Bật/tắt tiếng (M)" aria-pressed="false">
+          <svg class="ic-off" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 9.5h3l4-3.5v12l-4-3.5H4v-5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m16 9.5 4 5m0-5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <svg class="ic-on" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 9.5h3l4-3.5v12l-4-3.5H4v-5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.8a7.5 7.5 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+        <button class="btn btn-icon" id="captureBtn" title="Chụp ảnh gửi Giám sát tháng (C)">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+        <button class="btn btn-icon" id="closeViewer" title="Đóng (Esc)">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+    <div class="player" id="player">
+      <img id="playerImg" alt="Luồng camera trực tiếp" referrerpolicy="no-referrer">
+      <img id="posterImg" alt="" hidden>
+      <video id="playerVideo" playsinline muted autoplay hidden></video>
+      <div class="player-msg" id="playerMsg" hidden></div>
+      <button class="nav-arrow prev" id="prevCam" title="Camera trước (←)">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="nav-arrow next" id="nextCam" title="Camera sau (→)">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+      <div class="pb-bar" id="pbBar" hidden>
+        <div class="pb-row">
+          <span class="pb-label"><span class="live-dot"></span>XEM LẠI</span>
+          <button class="btn btn-icon day-nav" id="pbPrevDay" title="Ngày trước">‹</button>
+          <span id="pbDate">—</span>
+          <button class="btn btn-icon day-nav" id="pbNextDay" title="Ngày sau">›</button>
+          <span id="pbTime">—</span>
+          <span class="pb-spacer"></span>
+          <button class="btn btn-ghost" id="pbPick">Chọn giờ</button>
+          <button class="btn btn-soft" id="pbLive">Về live</button>
+        </div>
+        <div class="pb-row">
+          <div class="timeline" id="pbTimeline" title="Bấm hoặc kéo để tua tới khung giờ cần xem">
+            <div class="tl-segs" id="tlSegs"></div>
+            <div class="tl-head" id="tlHead"></div>
+            <div class="tl-ticks">
+              <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+    <div class="viewer-foot">
+      <label class="ar-pick" title="Tỉ lệ khung hình hiển thị">
+        <span>Tỉ lệ</span>
+        <select id="arSelect">
+          <option value="full">Full win</option>
+          <option value="1:1">1:1</option>
+          <option value="4:3">4:3</option>
+          <option value="5:4">5:4</option>
+          <option value="4:5">4:5</option>
+          <option value="16:9" selected>16:9</option>
+          <option value="9:16">9:16</option>
+        </select>
+      </label>
+      <div class="cam-pills" id="camPills"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ HỘP THOẠI ============ -->
+<div class="dialog" id="dialog" hidden>
+  <div class="dialog-backdrop" data-dialog-close></div>
+  <div class="dialog-card" role="dialog" aria-modal="true">
+    <h3 id="dialogTitle">—</h3>
+    <div id="dialogBody" class="dialog-body"></div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" data-dialog-close>Huỷ</button>
+      <button class="btn btn-primary" id="dialogOk">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GỬI ẢNH SANG GIÁM SÁT THÁNG ============ -->
+<div class="cap-dialog" id="capDialog" hidden>
+  <div class="cap-backdrop" data-cap-close></div>
+  <div class="cap-card" role="dialog" aria-modal="true" aria-label="Gửi ảnh vào Giám sát tháng">
+    <header class="cap-head">
+      <div>
+        <strong>Gửi ảnh vào Giám sát tháng</strong>
+        <span id="capWhere">—</span>
+      </div>
+      <button class="btn btn-icon" id="capClose" title="Đóng (Esc)">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="cap-body">
+      <div class="cap-left">
+        <canvas id="capCanvas"></canvas>
+        <div class="cap-tools">
+          <button class="chip is-active" data-tool="rect" type="button">▭ Khoanh vùng</button>
+          <button class="chip" data-tool="ellipse" type="button">◯ Khoanh tròn</button>
+          <button class="chip" id="capUndo" type="button">↶ Hoàn tác</button>
+          <button class="chip" id="capClear" type="button">Xoá hết</button>
+          <span class="cap-tip">Kéo chuột trên ảnh để khoanh vùng lỗi</span>
+        </div>
+      </div>
+      <div class="cap-right">
+        <label class="cap-field">DANH MỤC SỰ CỐ
+          <select id="capCategory"><option value="">— chọn —</option></select>
+        </label>
+        <label class="cap-field">HẠNG MỤC 5S <span class="cap-opt">(không bắt buộc)</span>
+          <select id="capItem"><option value="">— chọn —</option></select>
+        </label>
+        <label class="cap-field">MÔ TẢ SỰ CỐ
+          <textarea id="capDesc" rows="5" placeholder="Mô tả ngắn gọn sự việc…"></textarea>
+        </label>
+        <p class="cap-note">Ảnh đã khoanh vùng sẽ được đính kèm; tuần tự chọn theo ngày chụp.</p>
+      </div>
+    </div>
+    <footer class="cap-foot">
+      <button class="btn btn-ghost" id="capCancel" type="button">Huỷ</button>
+      <button class="btn btn-primary" id="capSend" type="button">Gửi vào Giám sát tháng</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ VÙNG CẢNH BÁO ============ -->
+<div class="cap-dialog" id="zoneDialog" hidden>
+  <div class="cap-backdrop" data-zone-close></div>
+  <div class="cap-card" role="dialog" aria-modal="true" aria-label="Vùng cảnh báo">
+    <header class="cap-head">
+      <div>
+        <strong>Vùng cảnh báo</strong>
+        <span id="zoneWhere">—</span>
+      </div>
+      <button class="btn btn-icon" id="zoneClose" title="Đóng (Esc)">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="cap-body zone-body">
+      <div class="cap-left">
+        <canvas id="zoneCanvas"></canvas>
+        <div class="cap-tools">
+          <button class="chip" id="zoneAll" type="button">Chọn tất cả</button>
+          <button class="chip" id="zoneNone" type="button">Bỏ chọn</button>
+          <button class="chip" id="zoneInvert" type="button">Đảo vùng</button>
+          <span class="cap-tip" id="zoneCount">Bấm hoặc kéo chuột để chọn ô vuông</span>
+        </div>
+      </div>
+    </div>
+    <footer class="cap-foot">
+      <button class="btn btn-ghost" id="zoneCancel" type="button">Huỷ</button>
+      <button class="btn btn-primary" id="zoneSave" type="button">Lưu vùng cảnh báo</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ ĐIỀU KHIỂN PTZ ============ -->
+<div class="cap-dialog" id="ptzDialog" hidden>
+  <div class="cap-backdrop" data-ptz-close></div>
+  <div class="cap-card ptz-card" role="dialog" aria-modal="true" aria-label="Điều khiển PTZ">
+    <header class="cap-head">
+      <div>
+        <strong>Điều khiển PTZ</strong>
+        <span id="ptzWhere">—</span>
+      </div>
+      <button class="btn btn-icon" id="ptzClose" title="Đóng (Esc)">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="ptz-body">
+      <div class="ptz-pad">
+        <button class="ptz-key" data-ptz="LeftUp" type="button" title="Chéo lên trái">↖</button>
+        <button class="ptz-key" data-ptz="Up" type="button" title="Lên">▲</button>
+        <button class="ptz-key" data-ptz="RightUp" type="button" title="Chéo lên phải">↗</button>
+        <button class="ptz-key" data-ptz="Left" type="button" title="Sang trái">◀</button>
+        <button class="ptz-key ptz-stop" id="ptzStop" type="button" title="Dừng">■</button>
+        <button class="ptz-key" data-ptz="Right" type="button" title="Sang phải">▶</button>
+        <button class="ptz-key" data-ptz="LeftDown" type="button" title="Chéo xuống trái">↙</button>
+        <button class="ptz-key" data-ptz="Down" type="button" title="Xuống">▼</button>
+        <button class="ptz-key" data-ptz="RightDown" type="button" title="Chéo xuống phải">↘</button>
+      </div>
+      <div class="ptz-side">
+        <div class="ptz-zoom">
+          <button class="btn btn-soft" data-ptz="ZoomTile" type="button">＋ Zoom</button>
+          <button class="btn btn-soft" data-ptz="ZoomWide" type="button">－ Zoom</button>
+        </div>
+        <label class="cap-field">Tốc độ quay
+          <input type="range" id="ptzSpeed" min="1" max="8" step="1" value="4">
+        </label>
+        <p class="cap-note">Giữ chuột trên phím để quay liên tục, thả ra để dừng. Chỉ camera hỗ trợ PTZ mới phản hồi.</p>
+      </div>
+    </div>
+    <footer class="cap-foot">
+      <button class="btn btn-ghost" id="ptzDone" type="button">Đóng</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/vendor/hls.light.min.js"></script>
+<script src="/app.js?v=20261104i"></script>
+</body>
+</html>

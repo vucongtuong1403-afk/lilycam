@@ -1,0 +1,20 @@
+# ---- dữ liệu thật & bí mật (không đưa lên GitHub) ----
+data/
+server.log
+*.log
+*.tar.gz
+
+# ---- toolchain Rust đặt trong dự án ----
+.cargo/
+.rustup/
+.rust-tmp/
+rust/target/
+rust/.smoke/
+
+# ---- binary nặng: tải theo hướng dẫn trong README/INSTALL ----
+bin/
+sdk/
+dist/
+
+# ---- node_modules cũ ----
+node_modules/

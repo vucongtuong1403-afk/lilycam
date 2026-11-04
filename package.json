@@ -1,0 +1,13 @@
+{
+  "name": "lilycam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web nội bộ xem camera các cửa hàng (Dahua qua HTTP Digest)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "sync": "node sync-lark.js",
+    "reset-password": "node server.js --reset-password"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,18 @@
+{
+  "enabled": false,
+  "cli": "/home/tuong-vu/Camera xịn vãi /bin/lark-cli",
+  "base_token": "DAN_BASE_TOKEN",
+  "table_id": "tblXXXXXXXXXXXX",
+  "base_url": "https://TEN-CONG-TY.larksuite.com/wiki/XXXXXXXX",
+  "photo_field": "HÌNH ẢNH SỰ CỐ",
+  "fields": {
+    "store": "CƠ SỞ",
+    "week": "TUẦN",
+    "time": "THỜI GIAN GHI NHẬN",
+    "description": "MÔ TẢ SỰ CỐ",
+    "category": "DANH MỤC SỰ CỐ",
+    "item": "HẠNG MỤC 5S",
+    "sent": "Đã gửi sự cố"
+  },
+  "open": "view"
+}

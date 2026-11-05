@@ -92,6 +92,19 @@ fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     era * 146097 + doe - 719468
 }
 
+/// Danh mục mặc định (dùng khi chưa kết nối được Lark) — khớp bảng Giám sát tháng.
+const DEFAULT_CATEGORIES: [&str; 17] = [
+    "QUY TRÌNH KIỂM TRA CHẤT LƯỢNG SẢN PHẨM", "VỆ SINH 5S", "PHIẾU NHẬP MẮT", "VPAGE",
+    "TÁC PHONG LÀM VIỆC", "HÓA ĐƠN BÁN LẺ", "PHIẾU NHÁP CHUYỂN KHO",
+    "HOẠT ĐỘNG MỞ/ĐÓNG CỬA HÀNG", "VẬN HÀNH KHO", "4C", "CHECK ẢNH VỆ SINH THEO CA",
+    "ĐỒNG PHỤC", "BPGS TEST", "TUÂN THỦ QUY TRÌNH ĐỒNG BỘ SẢN PHẢM",
+    "QUY TRÌNH ĐỒNG BỘ SẢN PHẢM", "TUÂN THỦ QUY ĐỊNH PHÒNG ĂN", "TEST",
+];
+const DEFAULT_ITEMS: [&str; 10] = [
+    "BÃI ĐỂ XE", "KHO HÀNG", "THU NGÂN", "CƠ SỞ VẬT CHẤT", "KHU VỰC ĐO KHÁM",
+    "KHU VỰC CẮT MẮT", "WC", "DIỆN MẠO CỬA HÀNG", "TRƯNG BÀY", "KHÔNG GIAN",
+];
+
 pub struct Lark {
     pub enabled: bool,
     cli: PathBuf,
@@ -283,6 +296,17 @@ impl Lark {
                 }
             }
         }
+        // Không lấy được từ Lark (máy mới chưa cấu hình base / chưa đăng nhập lark-cli)
+        // → dùng danh mục mặc định để hộp thoại vẫn chọn được
+        let mut cats = cats;
+        let mut items = items;
+        if cats.is_empty() {
+            cats = DEFAULT_CATEGORIES.iter().map(|s| s.to_string()).collect();
+        }
+        if items.is_empty() {
+            items = DEFAULT_ITEMS.iter().map(|s| s.to_string()).collect();
+        }
+        cats.dedup();
         let out = json!({ "categories": cats, "items": items });
         if let Ok(mut m) = self.options.lock() { *m = Some((Instant::now(), out.clone())); }
         out

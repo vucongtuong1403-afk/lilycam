@@ -16,7 +16,7 @@ impl Zones {
         Zones { path: path.to_path_buf(), map: Mutex::new(map) }
     }
     pub fn get(&self, store: &str, ch: u32) -> Value {
-        self.map.lock().unwrap().get(&format!("{store}:{ch}")).cloned().unwrap_or(Value::Null)
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).get(&format!("{store}:{ch}")).cloned().unwrap_or(Value::Null)
     }
     pub fn put(&self, _path: &Path, store: &str, ch: u32, v: &Value) -> Value {
         let cols = v.get("cols").and_then(|x| x.as_u64()).unwrap_or(16).clamp(1, 64);
@@ -28,8 +28,8 @@ impl Zones {
         cells.sort_unstable();
         cells.dedup();
         let zone = json!({ "cols": cols, "rows": rows, "cells": cells, "updatedAt": iso_local(Dt::now()) });
-        self.map.lock().unwrap().insert(format!("{store}:{ch}"), zone.clone());
-        if let Ok(s) = serde_json::to_string_pretty(&*self.map.lock().unwrap()) {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).insert(format!("{store}:{ch}"), zone.clone());
+        if let Ok(s) = serde_json::to_string_pretty(&*self.map.lock().unwrap_or_else(|e| e.into_inner())) {
             let _ = std::fs::write(&self.path, s);
         }
         zone
@@ -220,7 +220,7 @@ impl Lark {
     /// Đọc bảng Giám sát tháng để biết ai từng là người chịu trách nhiệm của từng nhóm chat.
     async fn learn_cht(&self) {
         {
-            let at = self.dir_at.lock().unwrap();
+            let at = self.dir_at.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(t) = *at { if t.elapsed() < Duration::from_secs(3600) { return; } }
         }
         let v = self.run(vec!["base".into(), "+record-list".into(), "--base-token".into(), self.base_token.clone(),
@@ -244,7 +244,7 @@ impl Lark {
                         if let (Some(c), Some(o)) = (chat, owner) { map.entry(c.to_string()).or_insert(o.to_string()); }
                     }
                     if let Ok(mut m) = self.cht_by_chat.lock() { *m = map; }
-                    println!("[lark] học được {} cặp cơ sở→người chịu trách nhiệm", self.cht_by_chat.lock().unwrap().len());
+                    println!("[lark] học được {} cặp cơ sở→người chịu trách nhiệm", self.cht_by_chat.lock().unwrap_or_else(|e| e.into_inner()).len());
                 }
             }
         }

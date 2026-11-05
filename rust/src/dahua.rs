@@ -1,6 +1,5 @@
 //! Client Dahua: HTTP Digest, snapshot, MJPEG, PTZ.
 use crate::Store;
-use sha2::Digest;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

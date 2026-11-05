@@ -13,6 +13,7 @@ pub struct PbSession {
 }
 
 impl PbSession {
+    #[allow(dead_code)]
     pub async fn kill(&mut self) {
         let _ = self.ff.start_kill();
         let _ = self.helper.start_kill();

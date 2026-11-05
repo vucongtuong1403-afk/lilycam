@@ -270,7 +270,7 @@ async fn api_login(State(app): State<Arc<App>>, headers: HeaderMap, body: String
     let key = user.to_lowercase();
     let now = auth::now_ms();
     {
-        let mut m = app.login_attempts.lock().unwrap();
+        let mut m = app.login_attempts.lock().unwrap_or_else(|e| e.into_inner());
         let e = m.entry(key.clone()).or_insert((0, now + 600_000));
         if e.1 < now { *e = (0, now + 600_000); }
         if e.0 >= 8 {

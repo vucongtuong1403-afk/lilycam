@@ -73,7 +73,7 @@ impl Hls {
         let start: i64 = profile.get(2..)?.parse().ok()?;
         let key = format!("{}-{}-{}", store.id, ch, profile);
         let existing = {
-            let m = self.pb.lock().unwrap();
+            let m = self.pb.lock().unwrap_or_else(|e| e.into_inner());
             m.get(&key).map(|s| s.dir.clone())
         };
         let dir = match existing {
@@ -87,7 +87,7 @@ impl Hls {
                 let dir = self.base.join(format!("{}-{}", key, crate::auth::now_ms()));
                 let sess = crate::netsdk::start(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, start, &dir).await?;
                 println!("[netsdk] mở {key}");
-                self.pb.lock().unwrap().insert(key.clone(), sess);
+                self.pb.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), sess);
                 dir
             }
         };
@@ -103,7 +103,7 @@ impl Hls {
     pub fn enabled(&self) -> bool { self.enabled }
 
     pub fn stats(&self) -> Value {
-        let m = self.sessions.lock().unwrap();
+        let m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let by: Vec<String> = m.values().map(|s| s.profile.clone()).collect();
         json!({ "sessions": m.len(), "max": self.max, "idleSec": 180, "byProfile": by, "list": [] })
     }
@@ -128,7 +128,7 @@ impl Hls {
     async fn ensure(&self, store: &Store, ch: u32, profile: &str, key: &str) -> Option<PathBuf> {
         if !self.enabled { return None; }
         let p = profile_of(profile)?;
-        let mut m = self.sessions.lock().unwrap();
+        let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(s) = m.get_mut(key) {
             s.last = Instant::now();
             return Some(s.dir.clone());
@@ -186,7 +186,7 @@ impl Hls {
 
     /// Đóng ngay các phiên lưới của một cơ sở để nhường kết nối cho cửa sổ xem.
     pub fn release(&self, store_id: &str) {
-        let mut m = self.sessions.lock().unwrap();
+        let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let prefix = format!("{store_id}-");
         let keys: Vec<String> = m.keys()
             .filter(|k| k.starts_with(&prefix) && !k.ends_with("-hd"))
@@ -231,7 +231,7 @@ impl Hls {
                 }
             }
         }
-        let mut m = self.sessions.lock().unwrap();
+        let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let dead: Vec<String> = m.iter().filter(|(_, s)| s.last.elapsed() > IDLE).map(|(k, _)| k.clone()).collect();
         for k in dead {
             if let Some(mut s) = m.remove(&k) {

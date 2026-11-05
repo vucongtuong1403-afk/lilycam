@@ -101,3 +101,62 @@ pub async fn start(
 
     Some(PbSession { dir: dir.to_path_buf(), helper: helper_child, ff, last: Instant::now() })
 }
+
+/// Cắt một đoạn bản ghi thành MP4 1080p (H.264 + faststart) để tải về máy.
+pub async fn clip(
+    helper: &Path,
+    sdk_lib: &Path,
+    ffmpeg: &Path,
+    store: &crate::Store,
+    ch: u32,
+    start_sec: i64,
+    dur: i64,
+    dir: &Path,
+) -> Option<PathBuf> {
+    if !helper.exists() || !ffmpeg.exists() { return None; }
+    std::fs::create_dir_all(dir).ok()?;
+    let dav = dir.join("rec.dav");
+    let end_sec = start_sec + dur;
+    let offset: i64 = std::env::var("PB_CHANNEL_OFFSET").ok().and_then(|v| v.parse().ok()).unwrap_or(-1);
+    let sdk_ch = (ch as i64 + offset).max(0);
+    let mut child = Command::new(helper)
+        .args([store.host.as_str(), &store.port.max(1).to_string(), &store.user, &store.pass,
+            &sdk_ch.to_string(), &start_sec.to_string(), &end_sec.to_string(), &dur.to_string()])
+        .env("PB_DOWNLOAD", dav.to_string_lossy().to_string())
+        .env("LD_LIBRARY_PATH", sdk_lib)
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .spawn().ok()?;
+
+    // chờ helper tải xong: file ngừng tăng trong ~3 giây, hoặc quá hạn
+    let deadline = Instant::now() + Duration::from_secs(dur as u64 + 60);
+    let mut last = 0u64;
+    let mut quiet = 0;
+    loop {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let size = std::fs::metadata(&dav).map(|m| m.len()).unwrap_or(0);
+        if size > 0 && size == last { quiet += 1; } else { quiet = 0; }
+        last = size;
+        if quiet >= 8 || Instant::now() > deadline { break; }
+    }
+    let _ = child.start_kill();
+    let raw = std::fs::read(&dav).ok()?;
+    if raw.len() < 1024 { return None; }
+    let mut state: Vec<u8> = Vec::new();
+    let stripped = strip(&mut state, &raw);
+    if stripped.is_empty() { return None; }
+    let h265 = dir.join("rec.h265");
+    std::fs::write(&h265, &stripped).ok()?;
+    let out = dir.join("clip.mp4");
+    let status = Command::new(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-f", "hevc", "-i", h265.to_str()?,
+            "-vf", "scale=-2:1080:flags=lanczos,fps=20,format=yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-maxrate", "6M", "-bufsize", "12M", "-profile:v", "main",
+            "-pix_fmt", "yuv420p", "-color_range", "tv", "-colorspace", "bt709",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-an", "-movflags", "+faststart", out.to_str()?])
+        .status().await.ok()?;
+    let _ = std::fs::remove_file(&h265);
+    if !status.success() || !out.exists() { return None; }
+    Some(out)
+}

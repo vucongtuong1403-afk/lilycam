@@ -183,6 +183,7 @@ async fn main() {
         .route("/api/session", get(api_session))
         .route("/api/stores", get(api_stores))
         .route("/api/stats", get(api_stats))
+        .route("/api/clip", get(api_clip))
         .route("/api/snap/{store}/{ch}", get(api_snap))
         .route("/api/meta/{store}/{ch}", get(api_meta))
         .route("/api/stream/{store}/{ch}", get(api_stream))
@@ -656,4 +657,38 @@ impl App {
     async fn dahua_mjpeg(&self, store: &Store, ch: u32) -> Result<reqwest::Response, String> {
         dahua::mjpeg(store, ch).await
     }
+}
+
+/// Cắt clip bản ghi thành MP4 1080p và trả về dạng tải xuống.
+async fn api_clip(State(app): State<Arc<App>>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if app.user_of(&headers).is_none() {
+        return err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập");
+    }
+    let id = q.get("store").cloned().unwrap_or_default();
+    let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    let ch: u32 = q.get("ch").and_then(|v| v.parse().ok()).unwrap_or(1);
+    let from: i64 = q.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let to: i64 = q.get("to").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if from <= 0 || to <= from {
+        return err_res(StatusCode::BAD_REQUEST, "Khung giờ không hợp lệ");
+    }
+    let dur = (to - from).min(1800);
+    let path = match app.hls.clip(&store, ch, from, dur).await {
+        Some(p) => p,
+        None => return err_res(StatusCode::INTERNAL_SERVER_ERROR, "Không cắt được clip (không có bản ghi hoặc đầu ghi bận)"),
+    };
+    let bytes = match tokio::fs::read(&path).await { Ok(b) => b, Err(_) => Vec::new() };
+    if let Some(dir) = path.parent() { let _ = tokio::fs::remove_dir_all(dir).await; }
+    if bytes.is_empty() {
+        return err_res(StatusCode::INTERNAL_SERVER_ERROR, "File clip rỗng");
+    }
+    let name = format!("{}-CAM{}-{}.mp4", store.id, ch, from);
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "video/mp4".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{name}\"")),
+        ],
+        axum::body::Bytes::from(bytes),
+    ).into_response()
 }

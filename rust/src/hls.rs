@@ -268,3 +268,12 @@ pub async fn rtsp_playback_supported(ffmpeg: &std::path::Path, store: &crate::St
     }
 }
 
+
+impl Hls {
+    /// Tạo clip tải về (đường dẫn MP4 trong thư mục tạm của tiến trình).
+    pub async fn clip(&self, store: &crate::Store, ch: u32, from: i64, dur: i64) -> Option<std::path::PathBuf> {
+        let dir = self.base.join(format!("clip-{}", crate::auth::now_ms()));
+        let r = crate::netsdk::clip(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, from, dur, &dir).await;
+        r
+    }
+}

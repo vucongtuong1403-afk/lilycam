@@ -2231,3 +2231,56 @@ applyFit();
     showLogin();
   }
 })();
+
+/* ---------------- Cắt clip bản ghi ---------------- */
+const toLocalInput = (ms) => {
+  const d = new Date(ms), p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T'
+    + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+};
+
+function clipRange() {
+  const f = new Date($('#clipFrom').value).getTime();
+  const t = new Date($('#clipTo').value).getTime();
+  return { f, t, ok: Number.isFinite(f) && Number.isFinite(t) && t > f };
+}
+
+function updateClipLen() {
+  const { f, t, ok } = clipRange();
+  const el = $('#clipLen');
+  if (!ok) { el.textContent = 'Chọn khung giờ hợp lệ (Đến phải sau Từ).'; return; }
+  const s = Math.round((t - f) / 1000);
+  el.textContent = 'Độ dài: ' + Math.floor(s / 60) + ' phút ' + (s % 60) + ' giây'
+    + (s > 1800 ? ' — quá 30 phút, hãy chọn ngắn hơn' : '');
+}
+
+$('#clipBtn').addEventListener('click', () => {
+  if (!state.playback) return;
+  const st = (state.stores || []).find((x) => x.id === state.viewer.id);
+  $('#clipSub').textContent = (st ? st.name : state.viewer.id) + ' · CAM ' + state.viewer.ch;
+  $('#clipFrom').value = toLocalInput(state.playback);
+  $('#clipTo').value = toLocalInput(state.playback + 60e3);
+  $('#clipDialog').hidden = false;
+  updateClipLen();
+});
+
+$('#clipDialog').addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]')) $('#clipDialog').hidden = true;
+});
+['#clipFrom', '#clipTo'].forEach((sel) => $(sel).addEventListener('change', updateClipLen));
+
+$('#clipGo').addEventListener('click', () => {
+  const { f, t, ok } = clipRange();
+  if (!ok) { updateClipLen(); return; }
+  if (Math.round((t - f) / 1000) > 1800) { updateClipLen(); return; }
+  const v = state.viewer;
+  const url = '/api/clip?store=' + encodeURIComponent(v.id) + '&ch=' + v.ch
+    + '&from=' + Math.floor(f / 1000) + '&to=' + Math.floor(t / 1000);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'clip-' + v.id + '-cam' + v.ch + '.mp4';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  $('#clipLen').textContent = 'Đang tạo clip (có thể mất vài chục giây)… trình duyệt sẽ hỏi nơi lưu.';
+});

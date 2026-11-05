@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0a0d12">
 <title>LilyCam — Camera cửa hàng</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=20261105g">
+<link rel="stylesheet" href="/styles.css?v=20261105h">
 </head>
 <body>
 
@@ -219,6 +219,7 @@
             <option value="2">2×</option>
             <option value="4">4×</option>
           </select>
+          <button class="btn btn-ghost" id="clipBtn" title="Cắt clip đoạn đang xem">✂ Cắt clip</button>
           <button class="btn btn-ghost" id="pbPick">Chọn giờ</button>
           <button class="btn btn-soft" id="pbLive">Về live</button>
         </div>
@@ -266,6 +267,31 @@
 </div>
 
 <!-- ============ GỬI ẢNH SANG GIÁM SÁT THÁNG ============ -->
+<div class="cap-dialog" id="clipDialog" hidden>
+  <div class="cap-backdrop" data-close="1"></div>
+  <div class="cap-card" style="width:min(430px,94vw)">
+    <div class="cap-head">
+      <strong>✂ Cắt clip bản ghi</strong>
+      <span class="cap-sub" id="clipSub"></span>
+      <button class="cap-x" type="button" data-close="1">✕</button>
+    </div>
+    <div class="cap-body" style="display:block">
+      <label class="cap-field">Từ
+        <input type="datetime-local" id="clipFrom" step="1">
+      </label>
+      <label class="cap-field" style="margin-top:10px">Đến
+        <input type="datetime-local" id="clipTo" step="1">
+      </label>
+      <p class="cap-hint" id="clipLen"></p>
+      <p class="cap-hint">Xuất MP4 1080p, tải thẳng về máy — trình duyệt sẽ hỏi thư mục lưu.</p>
+    </div>
+    <div class="cap-foot">
+      <button class="btn btn-ghost" type="button" data-close="1">Huỷ</button>
+      <button class="btn btn-primary" type="button" id="clipGo">Tải clip</button>
+    </div>
+  </div>
+</div>
+
 <div class="cap-dialog" id="capDialog" hidden>
   <div class="cap-backdrop" data-cap-close></div>
   <div class="cap-card" role="dialog" aria-modal="true" aria-label="Gửi ảnh vào Giám sát tháng">
@@ -391,6 +417,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="/vendor/hls.light.min.js"></script>
-<script src="/app.js?v=20261105g"></script>
+<script src="/app.js?v=20261105h"></script>
 </body>
 </html>

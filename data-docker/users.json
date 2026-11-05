@@ -1,0 +1,72 @@
+{
+  "users": [
+    {
+      "createdAt": "2026-11-05T10:25:02",
+      "hash": "5aa366dcc9a67cde90ed6f86c8570ee79e690818f7b722a7c8d2cc55d4bbc35377fd8c4f13e33c8c46657d959d4487fdd394a23043f5858de3dabc5df8c9cfbb",
+      "salt": "4206527580bd0f88bc47275ccc2f2ca5",
+      "username": "admin"
+    },
+    {
+      "allowed": {
+        "channels": {
+          "116a": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17
+          ]
+        },
+        "stores": [
+          "116a"
+        ]
+      },
+      "createdAt": "2026-11-03T07:11:36.552Z",
+      "hash": "2bdc6a2c6134953b8b5d0569e6a774c038076e438b5c80c203b9561621e1f4cd6717e860546af1d7b2363016cf706822768087425883e775fcbdc91b0b3c0c28",
+      "salt": "b226eb3b1f1610ea26282239467e5677",
+      "username": "linhcns"
+    },
+    {
+      "allowed": {
+        "channels": {
+          "116a": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17
+          ]
+        },
+        "stores": [
+          "116a"
+        ]
+      },
+      "createdAt": "2026-11-03T07:23:50.207Z",
+      "hash": "19faf4edff780c58245b7a932495df4e533e3144c48b02fbdc8ce368c63d4db6a6cfbced5a6b7a5ccdb69ebe526bdf10b5d6510de827bf5ac18f82d5a2235a0e",
+      "salt": "70aac08ded66d00b2dafd2f1782d1380",
+      "username": "giangketoan"
+    }
+  ]
+}

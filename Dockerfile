@@ -16,6 +16,8 @@ COPY --from=build /src/target/release/lilycam /app/lilycam
 COPY public /app/public
 COPY bin/ffmpeg /app/bin/ffmpeg
 COPY bin/dahua-pb /app/bin/dahua-pb
+COPY bin/lark-cli /app/bin/lark-cli
+RUN chmod +x /app/bin/lark-cli /app/bin/dahua-pb /app/bin/ffmpeg /app/lilycam
 COPY sdk /app/sdk
 COPY data.example /app/data.example
 RUN mkdir -p /app/data && cp -n /app/data.example/* /app/data/ 2>/dev/null || true

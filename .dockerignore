@@ -7,4 +7,3 @@ rust/target/
 node_modules/
 .git/
 *.log
-bin/lark-cli

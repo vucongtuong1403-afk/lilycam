@@ -12,4 +12,6 @@ services:
       IDLE_SECS: "180"
     volumes:
       - ./data:/app/data
-      # đặt data/cameras.json + users.json của bạn vào ./data
+      # token Lark (để nút Chụp ảnh ghi được lên Giám sát tháng)
+      - ${HOME}/.lark-cli:/root/.lark-cli
+      - ${HOME}/.local/share/lark-cli:/root/.local/share/lark-cli

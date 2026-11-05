@@ -23,7 +23,8 @@ impl Users {
     }
 
     pub fn verify(&self, user: &str, pass: &str) -> bool {
-        self.list.iter().find(|u| u.username == user).map(|u| {
+        // tên đăng nhập không phân biệt hoa/thường (người dùng hay gõ "Admin")
+        self.list.iter().find(|u| u.username.eq_ignore_ascii_case(user)).map(|u| {
             let params = match scrypt::Params::new(14, 8, 1, 64) { Ok(p) => p, Err(_) => return false };
             let mut out = [0u8; 64];
             if scrypt::scrypt(pass.as_bytes(), u.salt.as_bytes(), &params, &mut out).is_err() { return false; }
@@ -56,10 +57,12 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 pub fn issue_session(user: &str, secret: &[u8], ttl_secs: u64) -> String {
     let exp = now_ms() + ttl_secs as i64 * 1000;
     let payload = format!("{{\"u\":{},\"exp\":{}}}", serde_json::to_string(user).unwrap_or_else(|_| "\"\"".into()), exp);
+    // Node ký trên CHUỖI base64url của payload (không phải JSON gốc) — giữ đúng định dạng cũ
+    let body = URL_SAFE_NO_PAD.encode(payload.as_bytes());
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret).expect("hmac key");
-    mac.update(payload.as_bytes());
+    mac.update(body.as_bytes());
     let sig = mac.finalize().into_bytes();
-    format!("{}.{}", URL_SAFE_NO_PAD.encode(payload.as_bytes()), URL_SAFE_NO_PAD.encode(sig))
+    format!("{body}.{}", URL_SAFE_NO_PAD.encode(sig))
 }
 
 pub fn verify_session(token: &str, secret: &[u8]) -> Option<String> {

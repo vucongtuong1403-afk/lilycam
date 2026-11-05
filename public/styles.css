@@ -601,6 +601,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ---------------- Gửi ảnh sang Giám sát tháng ---------------- */
+.cap-quick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cap-quick-label { font-size: 11px; color: #8ba0b6; letter-spacing: .04em; font-weight: 600; }
+.cap-quick .chip.is-active { background: #14251b; border-color: #2b5c3d; color: #a7f3c4; }
 .cap-dialog { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; }
 .cap-backdrop { position: absolute; inset: 0; background: rgba(2, 5, 9, .74); }
 .cap-card {

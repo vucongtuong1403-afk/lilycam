@@ -1384,6 +1384,23 @@ function capDrawShape(ctx, s) {
   const w = Math.abs(s.x2 - s.x1);
   const h = Math.abs(s.y2 - s.y1);
   if (w < 3 || h < 3) return;
+  if (s.type === 'arrow') {
+    // mũi tên: thân + 2 cánh, đầu nhọn ở điểm kéo tới
+    const x1 = s.x1, y1 = s.y1, x2 = s.x2, y2 = s.y2;
+    const ang = Math.atan2(y2 - y1, x2 - x1);
+    const head = Math.max(18, ctx.canvas.width / 34);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7));
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7));
+    ctx.stroke();
+    return;
+  }
   ctx.beginPath();
   if (s.type === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
   else ctx.rect(x, y, w, h);
@@ -1429,6 +1446,9 @@ async function capLoadOptions() {
   };
   fill($('#capCategory'), capState.options.categories);
   fill($('#capItem'), capState.options.items);
+  // KHÔNG tự chọn danh mục — để người dùng tự chọn (nhưng giữ lựa chọn đã bấm trước đó)
+  if (capState.pickedCat) $('#capCategory').value = capState.pickedCat;
+  syncQuickCat();
   return capState.options;
 }
 
@@ -1484,7 +1504,7 @@ async function submitCaptureDialog() {
         store: capState.store,
         ch: capState.ch,
         image: cv.toDataURL('image/jpeg', 0.92),
-        category: $('#capCategory').value,
+        category: $('#capCategory').value || capState.pickedCat || '',
         item: $('#capItem').value,
         desc: $('#capDesc').value.trim(),
       }),
@@ -1526,6 +1546,22 @@ $('#capClose').addEventListener('click', closeCaptureDialog);
 $('#capCancel').addEventListener('click', closeCaptureDialog);
 document.querySelector('#capDialog [data-cap-close]').addEventListener('click', closeCaptureDialog);
 $('#capSend').addEventListener('click', submitCaptureDialog);
+
+/* hai lỗi tách biệt: 5S và 4C — bấm để chọn nhanh danh mục */
+function syncQuickCat() {
+  const cur = $('#capCategory').value;
+  document.querySelectorAll('#capQuick [data-cat]').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.cat === cur);
+  });
+}
+document.querySelectorAll('#capQuick [data-cat]').forEach((b) => {
+  b.addEventListener('click', () => {
+    capState.pickedCat = b.dataset.cat;   // nhớ lựa chọn kể cả khi danh sách chưa tải xong
+    $('#capCategory').value = b.dataset.cat;
+    syncQuickCat();
+  });
+});
+$('#capCategory').addEventListener('change', syncQuickCat);
 
 document.querySelectorAll('#capDialog .cap-tools [data-tool]').forEach((b) => {
   b.addEventListener('click', () => {

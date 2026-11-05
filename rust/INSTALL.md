@@ -90,3 +90,17 @@ bin/dahua-pb     helper NetSDK cho phần xem lại bản ghi
 sdk/lib/         thư viện Dahua NetSDK
 src/             mã nguồn Rust (Cargo.toml + src/*.rs)
 ```
+
+## Dữ liệu cần có trong `data/`
+
+| Tệp | Vai trò |
+|---|---|
+| `cameras.json` | danh sách cơ sở + tài khoản đầu ghi (điền tay) |
+| `users.json` | tài khoản đăng nhập (hash scrypt) — tạo bằng `./lilycam --set-password admin …` |
+| `stores.json` | danh mục cơ sở có `cht_id` (cửa hàng trưởng) để tự gắn người chịu trách nhiệm khi lỗi 5S/4C |
+| `dm.ndjson` | (tuỳ chọn) danh bạ cũ — nguồn dự phòng cho CHT và nhóm chat |
+| `lark.json` | cấu hình base Giám sát tháng (đặt `enabled: false` nếu không dùng) |
+| `lark-views.json` | bản đồ cơ sở → tab (view) trong bảng |
+
+Thiếu `stores.json` thì web vẫn chạy, chỉ là không tự gắn được CHT cho lỗi 5S/4C.
+

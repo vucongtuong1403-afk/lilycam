@@ -321,3 +321,25 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |
 | Quên mật khẩu | `node server.js --reset-password` |
+
+---
+
+## Quy tắc khi chụp ảnh gửi Giám sát tháng (cập nhật 05/11/2026)
+
+1. Bấm **📷** → hộp thoại hiện ảnh đang xem, có 3 công cụ đánh dấu:
+   - **▭ Khoanh vùng**, **◯ Khoanh tròn**, **➜ Mũi tên chỉ lỗi** (kéo từ điểm bắt đầu tới đúng chỗ vi phạm),
+   - **↶ Hoàn tác** / **Xoá hết**; ảnh gửi lên là ảnh đã đánh dấu.
+2. **DANH MỤC SỰ CỐ** để trống cho bạn tự chọn — có 2 nút chọn nhanh **Lỗi 5S** / **Lỗi 4C**.
+3. Tự động điền theo danh mục:
+
+   | Danh mục | NGƯỜI CHỊU TRÁCH NHIỆM | NHẬN XÉT CỦA GIÁM SÁT VIÊN |
+   |---|---|---|
+   | VỆ SINH 5S / 4C | tự gắn **cửa hàng trưởng (CHT)** của cơ sở | để trống |
+   | Lỗi khác | để trống | “Trưởng bộ phận note tên người chịu trách nhiệm” |
+
+4. **Không** tự tích “Đã gửi sự cố” và không tự bấm nút “Gửi sự cố” — người dùng tự làm để automation
+   định tuyến tới GSV duyệt.
+
+Dữ liệu CHT lấy từ `data/stores.json` (danh mục cơ sở của công cụ 5S, 35/35 cơ sở có `cht_id`);
+`data/dm.ndjson` chỉ còn là nguồn dự phòng (26/37 cơ sở).
+

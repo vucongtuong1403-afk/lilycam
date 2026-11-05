@@ -169,6 +169,24 @@ impl Hls {
         }
     }
 
+    /// Tắt server: đóng hết ffmpeg (tránh tiến trình mồ côi giữ kết nối đầu ghi).
+    pub fn shutdown(&self) {
+        if let Ok(mut m) = self.sessions.lock() {
+            for (_, mut s) in m.drain() {
+                let _ = s.child.start_kill();
+                let _ = std::fs::remove_dir_all(&s.dir);
+            }
+        }
+        if let Ok(mut pb) = self.pb.lock() {
+            for (_, mut s) in pb.drain() {
+                let _ = s.ff.start_kill();
+                let _ = s.helper.start_kill();
+                let _ = std::fs::remove_dir_all(&s.dir);
+            }
+        }
+        println!("[hls] đã đóng toàn bộ phiên");
+    }
+
     /// Đóng các phiên không ai xem quá 3 phút.
     pub fn sweep(&self) {
         if let Ok(mut pb) = self.pb.lock() {

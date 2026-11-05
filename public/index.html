@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0a0d12">
 <title>LilyCam — Camera cửa hàng</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=20261104i">
+<link rel="stylesheet" href="/styles.css?v=20261105d">
 </head>
 <body>
 
@@ -277,12 +277,18 @@
         <div class="cap-tools">
           <button class="chip is-active" data-tool="rect" type="button">▭ Khoanh vùng</button>
           <button class="chip" data-tool="ellipse" type="button">◯ Khoanh tròn</button>
+          <button class="chip" data-tool="arrow" type="button">➜ Mũi tên chỉ lỗi</button>
           <button class="chip" id="capUndo" type="button">↶ Hoàn tác</button>
           <button class="chip" id="capClear" type="button">Xoá hết</button>
           <span class="cap-tip">Kéo chuột trên ảnh để khoanh vùng lỗi</span>
         </div>
       </div>
       <div class="cap-right">
+        <div class="cap-quick" id="capQuick">
+          <span class="cap-quick-label">Chọn nhanh</span>
+          <button class="chip" type="button" data-cat="VỆ SINH 5S">Lỗi 5S</button>
+          <button class="chip" type="button" data-cat="4C">Lỗi 4C</button>
+        </div>
         <label class="cap-field">DANH MỤC SỰ CỐ
           <select id="capCategory"><option value="">— chọn —</option></select>
         </label>
@@ -378,6 +384,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="/vendor/hls.light.min.js"></script>
-<script src="/app.js?v=20261104i"></script>
+<script src="/app.js?v=20261105d"></script>
 </body>
 </html>

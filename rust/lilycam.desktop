@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=LilyCam
+Name[vi]=LilyCam — Camera cửa hàng
+Comment=Xem camera trực tiếp các cửa hàng
+Comment[vi]=Mở web LilyCam trên máy này
+Exec=xdg-open http://localhost:8790
+Icon=camera-video
+Terminal=false
+Categories=Network;
+Keywords=camera;lilycam;xem;cua hang;
+StartupNotify=true

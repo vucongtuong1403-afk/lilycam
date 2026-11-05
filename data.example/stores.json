@@ -1,0 +1,317 @@
+[
+  {
+    "ten": "Giám sát test",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Trọng Dũng - GSMB - 0967569630",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "",
+    "khu_vuc": ""
+  },
+  {
+    "ten": "57 Nguyễn Ngọc Doãn - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Trần Khánh Linh - CHT - 57 Nguyễn Ngọc Doãn - 0707292658",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "356 Cầu Giấy - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Trần Nguyễn Sông Hương-CHT-Cơ sở 356 Cầu Giấy-0362423154",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "148 Hạ Đình - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Đinh Thị Lan Anh-NVBH cơ sở 148 Hạ Đình-0855407556",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "115 Kim Mã - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Vũ Thị Huyền Anh - CHT-115 Kim Mã- 0943736295",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "167 Trần Hưng Đạo - Bắc Ninh",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Trần Trung Khoa - CHT 167 Trần Hưng Đạo - Bắc Ninh-0977491143",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "274 Nguyễn Trãi - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Phạm Thị Hải Yến - CHT 274 Nguyễn Trãi - 0877529692",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "237 Chùa Bộc - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Hương Giang - CHT - 237 Chùa Bộc - 0372202605",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "20 Hồ Tùng Mậu - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Vũ Tiến Đức-CHT-Cơ sở 20 Hồ Tùng Mậu-0936022989",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "153 Trần Đại Nghĩa - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Thị Phương-CHT-Cơ sở 153 Trần Đại Nghĩa-0393851550",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "189 Lê Hoàn - Thanh Hóa",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Thuỳ Dương - CHT - cơ sở 189 Lê Hoàn - 0976707501",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Trung",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "86 Lê Văn Sỹ - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Ngô Thị Thuỳ Linh-CHT-Cơ sở 86 Lê Văn Sỹ-0933539406",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "319 Lê Lợi - Hải Phòng",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Đào Đức Công -CHT-Cơ sở 319 Lê Lợi Hải Phòng-0981436815",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "308 Võ Văn Ngân - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Thị Mỹ Hồng-CHT-Cơ sở Võ Văn Ngân-0344985949",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "287 Nguyễn Trãi - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Hoàng Anh Thư-NVBH287 Nguyễn Trãi HCM-0905056407",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "30 Chùa Láng - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Thị Yến My - CHT 30 Chùa Láng - 0973484698",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "714 Sư Vạn Hạnh - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Đặng Ngọc Yến Nhi - CHT - Cơ sở 714 Sư Vạn Hạnh - 0934975404",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "108 Nguyễn Gia Trí - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Phạm Thị An Phú-CHT cơ sở 108 Nguyễn Gia Trí, HCM-0343649068",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "186 Nguyễn Văn Cừ - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Huỳnh Sơn - CHT - Cơ sở 186 Nguyễn Văn Cừ - 0987940990",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "23 Lê Văn Hiến - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Vi Mạnh Hùng-KTV23 Lê Văn Hiến HN-0876126022",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "179 Trâu Quỳ - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Việt Hoàng-CHT cơ sở 179 Trâu Quỳ-0372140887",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "49 Lương Ngọc Quyến - Thái Nguyên",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Trần Ninh Như Ngọc - CHT - 49 Lương Ngọc Quyến, TN - 0869743986",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "415 Phan Văn Trị - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Ngọc Hải Yến-CHT cơ sở 425 Phan Văn Trị, HCM-0917246821",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "234 Quang Trung - HN",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Lê Đức Anh - CHT - 234 Quang Trung - 0364253333",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Bắc",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "96 Mậu Thân - Cần Thơ",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Lily 96 Mậu Thân - Cần Thơ - 0988289025",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "103 Yersin - Bình Dương",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Lê Hồng Nhi - CHT 103 Yersin Bình Dương - 0395114332",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "56 Bà Hom - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Bùi Thị Thu Thủy - CHT 56 Bà Hom - 0932066774",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "10DA1 Nguyễn Ảnh Thủ - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Huỳnh Sơn Thùy - CHT 10DA1 Nguyễn Ảnh Thủ HCM - 0772089104",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "481 Nguyễn Thị Thập - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Đặng Thị Ngọc Giàu - CHT 481 Nguyễn Thị Thập HCM-0377389419",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "357 Quang Trung - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Phạm Uyển Nhi-CHT cơ sở 357 Quang Trung-0919990256",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "134 Lê Duẩn - Đà Nẵng",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Phạm Thu Lệ - CHT 134 Lê Duẩn, Đà Nẵng - 0784381534",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Trung",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "382 Trần Phú - Bạc Liêu",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Phan Ngọc Kiển- CHT- 382 Trần Phú, Bạc Liêu - 0393442124",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "127 Lê Văn Việt - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Bùi Hồng Thúy - CHT - 127 Lê Văn Việt - 0365177502",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  },
+  {
+    "ten": "45 Nguyễn Văn Cừ - Nghệ An",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Đinh Văn Tiềm - CHT - 45 Nguyễn Văn Cừ, TP Vinh - 0967915358",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Trung",
+    "khu_vuc": "Ngoại thành"
+  },
+  {
+    "ten": "99 Trần Quang Diệu - HCM",
+    "chat_id": "oc_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "chat_name": "Lily <ten co so>",
+    "cht": "Nguyễn Trung Hậu - CHT - Trần Quang Diệu - 0559120203",
+    "cht_id": "ou_XXXXXXXXXXXXXXXXXXXXXXXX",
+    "mien": "Nam",
+    "khu_vuc": "Nội thành"
+  }
+]

@@ -64,6 +64,16 @@ fn uptime_secs() -> u64 {
     START.get_or_init(std::time::Instant::now).elapsed().as_secs()
 }
 
+/// Chờ Ctrl+C hoặc SIGTERM (systemd stop) để dọn phiên trước khi thoát.
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut term = signal(SignalKind::terminate()).expect("sigterm");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = term.recv() => {}
+    }
+}
+
 fn read_json(path: &std::path::Path) -> Option<Value> {
     std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok())
 }
@@ -193,7 +203,14 @@ async fn main() {
     println!("LilyCam (Rust) — http://localhost:{port}");
     println!("  Dữ liệu: {} cơ sở", app.stores.len());
     let listener = tokio::net::TcpListener::bind(addr).await.expect("không mở được cổng");
-    axum::serve(listener, router).await.unwrap();
+    let app_sig = app.clone();
+    tokio::select! {
+        _ = axum::serve(listener, router) => {}
+        _ = shutdown_signal() => {
+            println!("Đang tắt: đóng các phiên camera…");
+            app_sig.hls.shutdown();
+        }
+    }
 }
 
 /* ------------------------------- tiện ích ------------------------------- */
@@ -256,7 +273,7 @@ async fn api_login(State(app): State<Arc<App>>, headers: HeaderMap, body: String
             return err_res(StatusCode::TOO_MANY_REQUESTS, "Tài khoản bị tạm khoá 10 phút do sai nhiều lần.");
         }
     }
-    if !app.users.verify(&user, pass) {
+    if user.is_empty() || !app.users.verify(&user, pass) {
         if let Ok(mut m) = app.login_attempts.lock() {
             if let Some(e) = m.get_mut(&key) { e.0 += 1; }
         }

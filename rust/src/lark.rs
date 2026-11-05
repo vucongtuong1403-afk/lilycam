@@ -102,6 +102,10 @@ pub struct Lark {
     view_for: HashMap<String, String>,
     fallback_view: Option<String>,
     chat: HashMap<String, String>,
+    cht: HashMap<String, String>,
+    /// chat_id → open_id người chịu trách nhiệm, học từ các dòng đã có trong bảng
+    cht_by_chat: Mutex<HashMap<String, String>>,
+    dir_at: Mutex<Option<Instant>>,
     options: Mutex<Option<(Instant, Value)>>,
 }
 
@@ -127,12 +131,46 @@ impl Lark {
         }
         let fallback_view = views.get("fallback").and_then(|v| v.as_str()).map(String::from);
         let mut chat = HashMap::new();
+        let mut cht = HashMap::new();
         if let Ok(raw) = std::fs::read_to_string(data.join("dm.ndjson")) {
             for line in raw.lines() {
                 if let Ok(v) = serde_json::from_str::<Value>(line) {
-                    let name = v.get("Tên cơ sở").and_then(|x| x.as_str()).unwrap_or("");
-                    if let (c, Some(id)) = (norm(name), v.get("chat_id").and_then(|x| x.as_str())) {
-                        if !c.is_empty() { chat.insert(c, id.to_string()); }
+                    let name = norm(v.get("Tên cơ sở").and_then(|x| x.as_str()).unwrap_or(""));
+                    if name.is_empty() { continue; }
+                    if let Some(id) = v.get("chat_id").and_then(|x| x.as_str()) {
+                        chat.insert(name.clone(), id.to_string());
+                    }
+                    // cửa hàng trưởng: phần tử có "CHT" trong tên ở danh sách tài khoản
+                    if let Some(acc) = v.get("Account đã được cấp quyền xử lý").and_then(|x| x.as_array()) {
+                        for a in acc {
+                            let who = a.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                            if who.to_uppercase().contains("CHT") {
+                                if let Some(id) = a.get("id").and_then(|x| x.as_str()) {
+                                    cht.insert(name.clone(), id.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // danh mục cơ sở đầy đủ (5S) có cht_id cho gần như mọi cơ sở — ưu tiên hơn dm.ndjson
+        if let Ok(raw) = std::fs::read_to_string(data.join("stores.json")) {
+            if let Ok(arr) = serde_json::from_str::<Value>(&raw) {
+                if let Some(list) = arr.as_array() {
+                    for s in list {
+                        let ten = s.get("ten").and_then(|x| x.as_str()).unwrap_or("");
+                        if ten.is_empty() { continue; }
+                        let n = norm(ten);
+                        if let Some(id) = s.get("cht_id").and_then(|x| x.as_str()) {
+                            if !id.is_empty() {
+                                cht.insert(n.clone(), id.to_string());
+                                cht.insert(loose(ten), id.to_string());
+                            }
+                        } else if let Some(cid) = s.get("chat_id").and_then(|x| x.as_str()) {
+                            if !cid.is_empty() { chat.insert(n.clone(), cid.to_string()); }
+                        }
                     }
                 }
             }
@@ -144,7 +182,8 @@ impl Lark {
             table_id: cfg.get("table_id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
             base_url: cfg.get("base_url").and_then(|x| x.as_str()).map(String::from),
             photo_field: cfg.get("photo_field").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            view_for, fallback_view, chat,
+            view_for, fallback_view, chat, cht,
+            cht_by_chat: Mutex::new(HashMap::new()), dir_at: Mutex::new(None),
             options: Mutex::new(None),
         }
     }
@@ -153,6 +192,50 @@ impl Lark {
 
     pub fn chat_of(&self, name: &str) -> Option<String> {
         self.chat.get(&norm(name)).cloned().or_else(|| self.chat.get(&loose(name)).cloned())
+    }
+
+    /// Open ID của cửa hàng trưởng: ưu tiên dm.ndjson, thiếu thì học từ bảng Giám sát tháng.
+    pub async fn cht_of(&self, name: &str) -> Option<String> {
+        if let Some(id) = self.cht.get(&norm(name)).cloned().or_else(|| self.cht.get(&loose(name)).cloned()) {
+            return Some(id);
+        }
+        self.learn_cht().await;
+        let chat = self.chat_of(name)?;
+        self.cht_by_chat.lock().ok()?.get(&chat).cloned()
+    }
+
+    /// Đọc bảng Giám sát tháng để biết ai từng là người chịu trách nhiệm của từng nhóm chat.
+    async fn learn_cht(&self) {
+        {
+            let at = self.dir_at.lock().unwrap();
+            if let Some(t) = *at { if t.elapsed() < Duration::from_secs(3600) { return; } }
+        }
+        let v = self.run(vec!["base".into(), "+record-list".into(), "--base-token".into(), self.base_token.clone(),
+            "--table-id".into(), self.table_id.clone(), "--page-size".into(), "500".into(), "--format".into(), "json".into()],
+            Duration::from_secs(90)).await;
+        if let Ok(v) = v {
+            if let (Some(ids), Some(rows)) = (
+                v.pointer("/data/field_id_list").and_then(|x| x.as_array()),
+                v.pointer("/data/data").and_then(|x| x.as_array()),
+            ) {
+                let names: Vec<String> = ids.iter().filter_map(|x| x.as_str()).map(String::from).collect();
+                let i_store = names.iter().position(|n| n == "fldj3xt3dD");
+                let i_owner = names.iter().position(|n| n == "fldUt5zN5k");
+                if let (Some(si), Some(oi)) = (i_store, i_owner) {
+                    let mut map = HashMap::new();
+                    for row in rows {
+                        let chat = row.get(si).and_then(|c| c.as_array()).and_then(|a| a.first())
+                            .and_then(|o| o.get("id")).and_then(|x| x.as_str());
+                        let owner = row.get(oi).and_then(|c| c.as_array()).and_then(|a| a.first())
+                            .and_then(|o| o.get("id")).and_then(|x| x.as_str());
+                        if let (Some(c), Some(o)) = (chat, owner) { map.entry(c.to_string()).or_insert(o.to_string()); }
+                    }
+                    if let Ok(mut m) = self.cht_by_chat.lock() { *m = map; }
+                    println!("[lark] học được {} cặp cơ sở→người chịu trách nhiệm", self.cht_by_chat.lock().unwrap().len());
+                }
+            }
+        }
+        if let Ok(mut at) = self.dir_at.lock() { *at = Some(Instant::now()); }
     }
 
     pub fn view_of(&self, store: &str) -> Option<String> {
@@ -228,10 +311,27 @@ impl Lark {
         fields.insert("TUẦN".into(), json!([format!("Tuần {week}")]));
         fields.insert("THỜI GIAN GHI NHẬN".into(), json!(iso_local(now)));
         if let Some(chat) = self.chat_of(&store.name) { fields.insert("CƠ SỞ".into(), json!([{ "id": chat }])); }
+        // chỉ tự gắn cửa hàng trưởng khi danh mục là lỗi 5S hoặc 4C
+        let cat = v.get("category").and_then(|x| x.as_str()).unwrap_or("").trim().to_uppercase();
+        let is_5s_or_4c = cat.contains("5S") || cat == "4C";
+        // lỗi KHÁC 5S/4C: nhắc trưởng bộ phận ghi tên người chịu trách nhiệm vào nhận xét GSV
+        if !is_5s_or_4c {
+            fields.insert("NHẬN XÉT CỦA GIÁM SÁT VIÊN".into(),
+                json!("Trưởng bộ phận note tên người chịu trách nhiệm"));
+        }
+        let mut cht_hit = None;
+        if is_5s_or_4c {
+            if let Some(cht) = self.cht_of(&store.name).await {
+                cht_hit = Some(cht.clone());
+                fields.insert("NGƯỜI CHỊU TRÁCH NHIỆM".into(), json!([{ "id": cht }]));
+            }
+        }
+        println!("[capture] {} · {} · cat='{}' · cht={:?}", store.id, store.name, cat,
+            cht_hit.as_deref().map(|c| &c[..c.len().min(12)]));
         if let Some(d) = v.get("desc").and_then(|x| x.as_str()) { if !d.is_empty() { fields.insert("MÔ TẢ SỰ CỐ".into(), json!(d)); } }
         if let Some(c) = v.get("category").and_then(|x| x.as_str()) { if !c.is_empty() { fields.insert("DANH MỤC SỰ CỐ".into(), json!([c])); } }
         if let Some(i) = v.get("item").and_then(|x| x.as_str()) { if !i.is_empty() { fields.insert("HẠNG MỤC 5S".into(), json!([i])); } }
-        fields.insert("Đã gửi sự cố".into(), json!(true));
+        // người dùng tự bấm "Gửi sự cố"/tích "Đã gửi sự cố" — web không đụng vào
 
         let payload = json!({ "create_records": [fields] }).to_string();
         let tmp = std::env::temp_dir().join(format!("lilycam-lark-{}.json", std::process::id()));

@@ -343,3 +343,13 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 Dữ liệu CHT lấy từ `data/stores.json` (danh mục cơ sở của công cụ 5S, 35/35 cơ sở có `cht_id`);
 `data/dm.ndjson` chỉ còn là nguồn dự phòng (26/37 cơ sở).
 
+
+---
+
+## Cấu trúc kho mã (cập nhật 05/11/2026)
+
+- `rust/` — mã nguồn server hiện tại (Rust, axum + tokio), đóng gói qua `Dockerfile`.
+- `public/` — giao diện web.
+- `data/` — dữ liệu thật (không đưa lên git): cameras, users, zones, captures…
+- `legacy/` — **bản Node.js cũ**, chỉ để tham chiếu, không dùng để chạy.
+- `tools/` — script phụ: `backup.sh`, `dahua-pb.c`, `bench*`.

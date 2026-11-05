@@ -814,14 +814,33 @@ function pbView() {
 }
 
 function pbTicks() {
+  const box = document.querySelector('#pbTimeline .tl-ticks');
+  if (!box) return;
   const { start, span } = pbView();
-  const boxes = document.querySelectorAll('#pbTimeline .tl-ticks span');
-  const parts = 4;
-  boxes.forEach((b, i) => {
-    const t = new Date(start + (span / parts) * i);
-    const p = (n) => String(n).padStart(2, '0');
-    b.textContent = p(t.getHours()) + ':' + p(t.getMinutes());
-  });
+  // bước vạch tuỳ mức phóng to: 1h → 30m → 15m → 5m → 1m → 30s
+  const step = span >= 12 * 3600e3 ? 3600e3
+    : span >= 4 * 3600e3 ? 1800e3
+    : span >= 90 * 60e3 ? 900e3
+    : span >= 25 * 60e3 ? 300e3
+    : span >= 8 * 60e3 ? 60e3
+    : 30e3;
+  box.textContent = '';
+  const p = (n) => String(n).padStart(2, '0');
+  const first = Math.ceil(start / step) * step;
+  for (let t = first; t < start + span; t += step) {
+    const left = ((t - start) / span) * 100;
+    const d = new Date(t);
+    const major = step >= 900e3 ? d.getMinutes() === 0 : d.getMinutes() % 5 === 0;
+    const tick = el('i', 'tl-tick' + (major ? ' major' : ''));
+    tick.style.left = left + '%';
+    box.append(tick);
+    if (major) {
+      const label = el('span', 'tl-tick-label',
+        step >= 3600e3 ? p(d.getHours()) + ':00' : p(d.getHours()) + ':' + p(d.getMinutes()));
+      label.style.left = left + '%';
+      box.append(label);
+    }
+  }
 }
 
 function renderTimeline() {

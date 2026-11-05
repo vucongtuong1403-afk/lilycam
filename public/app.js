@@ -806,20 +806,39 @@ const fmtDay = (ms) => {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
 };
 
+function pbView() {
+  const day = state.pbDay || dayStart(new Date());
+  const span = state.pbSpan || 86400e3;
+  const start = state.pbViewStart != null ? state.pbViewStart : day;
+  return { day, start, span };
+}
+
+function pbTicks() {
+  const { start, span } = pbView();
+  const boxes = document.querySelectorAll('#pbTimeline .tl-ticks span');
+  const parts = 4;
+  boxes.forEach((b, i) => {
+    const t = new Date(start + (span / parts) * i);
+    const p = (n) => String(n).padStart(2, '0');
+    b.textContent = p(t.getHours()) + ':' + p(t.getMinutes());
+  });
+}
+
 function renderTimeline() {
   const segs = $('#tlSegs');
   if (!segs) return;
   segs.textContent = '';
-  const day = state.pbDay || dayStart(new Date());
+  const { start, span } = pbView();
   for (const seg of state.pbSegs) {
-    const a = Math.max(seg.s * 1000, day);
-    const b = Math.min(seg.e * 1000, day + 86400e3);
+    const a = Math.max(seg.s * 1000, start);
+    const b = Math.min(seg.e * 1000, start + span);
     if (b <= a) continue;
     const el2 = el('div', 'tl-seg');
-    el2.style.left = ((a - day) / 86400e3) * 100 + '%';
-    el2.style.width = ((b - a) / 86400e3) * 100 + '%';
+    el2.style.left = ((a - start) / span) * 100 + '%';
+    el2.style.width = ((b - a) / span) * 100 + '%';
     segs.append(el2);
   }
+  pbTicks();
 }
 
 async function loadRecords(storeId, ch) {
@@ -897,6 +916,8 @@ function startPlayback(s, ch) {
   msg.textContent = 'Đang tải bản ghi để phát mượt (5–10 giây)…';
 
   state.pbT0 = Date.now();
+  state.pbSpan = state.pbSpan || 86400e3;
+  state.pbViewStart = dayStart(new Date(state.playback));
   if (!state.pbDay || state.playback < state.pbDay || state.playback >= state.pbDay + 86400e3) {
     state.pbDay = dayStart(new Date(state.playback));
   }
@@ -1297,31 +1318,73 @@ let tlDragging = false;
 const timeFromEvent = (e) => {
   const r = tl.getBoundingClientRect();
   const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-  return (state.pbDay || dayStart(new Date())) + ratio * 86400e3;
+  const { start, span } = pbView();
+  return start + ratio * span;
 };
 const showGhost = (ms) => {
   const head = $('#tlHead');
-  const day = state.pbDay || dayStart(new Date());
-  head.style.left = Math.min(100, Math.max(0, ((ms - day) / 86400e3) * 100)) + '%';
+  const { start, span } = pbView();
+  head.style.left = Math.min(100, Math.max(0, ((ms - start) / span) * 100)) + '%';
   $('#pbTime').textContent = fmtDT(ms);
 };
+let tlPan = null;
 tl.addEventListener('pointerdown', (e) => {
   if (!state.playback) return;
+  tl.setPointerCapture(e.pointerId);
+  if (e.shiftKey || e.button === 1) {
+    // giữ Shift (hoặc chuột giữa) + kéo = trượt timeline
+    tlPan = { x: e.clientX, start: pbView().start };
+    tl.classList.add('is-dragging');
+    return;
+  }
   tlDragging = true;
   tl.classList.add('is-dragging');
-  tl.setPointerCapture(e.pointerId);
   showGhost(timeFromEvent(e));
 });
 tl.addEventListener('pointermove', (e) => {
+  if (tlPan) {
+    const day = dayStart(new Date(state.playback || Date.now()));
+    const { span } = pbView();
+    const dx = ((e.clientX - tlPan.x) / tl.getBoundingClientRect().width) * span;
+    state.pbSpan = span;
+    state.pbViewStart = Math.max(day, Math.min(tlPan.start - dx, day + 86400e3 - span));
+    renderTimeline();
+    return;
+  }
   if (!tlDragging) return;
   showGhost(timeFromEvent(e));
 });
-tl.addEventListener('pointerup', (e) => {
+const tlUp = (e) => {
+  if (tlPan) { tlPan = null; tl.classList.remove('is-dragging'); return; }
   if (!tlDragging) return;
   tlDragging = false;
   tl.classList.remove('is-dragging');
   const t = Math.min(Date.now() - 1000, timeFromEvent(e));
   seekTo(t);
+};
+tl.addEventListener('pointerup', tlUp);
+tl.addEventListener('pointercancel', () => { tlPan = null; tlDragging = false; tl.classList.remove('is-dragging'); });
+
+// lăn chuột trên timeline = phóng to / thu nhỏ quanh con trỏ
+tl.addEventListener('wheel', (e) => {
+  if (!state.playback) return;
+  e.preventDefault();
+  const day = dayStart(new Date(state.playback || Date.now()));
+  const view = pbView();
+  const r = tl.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  const anchor = view.start + ratio * view.span;
+  const span = Math.min(86400e3, Math.max(600e3, view.span * (e.deltaY > 0 ? 1.3 : 0.75)));
+  state.pbSpan = span;
+  state.pbViewStart = Math.max(day, Math.min(anchor - ratio * span, day + 86400e3 - span));
+  renderTimeline();
+}, { passive: false });
+
+// tốc độ phát
+$('#pbSpeed').addEventListener('change', (e) => {
+  const r = Number(e.target.value) || 1;
+  const v = $('#playerVideo');
+  if (v) v.playbackRate = r;
 });
 $('#pbLive').addEventListener('click', () => {
   state.playback = null;

@@ -71,9 +71,13 @@ pub async fn start(
     let dav = dir.join("rec.dav");
     let max_sec = 600i64;
     let end_sec = start_sec + max_sec;
+    // Dahua NetSDK đánh kênh từ 0, còn web/RTSP đánh từ 1 → phải trừ 1.
+    // "CAM N" (UI) = kênh N-1 của SDK. Đổi bằng PB_CHANNEL_OFFSET nếu đầu ghi khác.
+    let offset: i64 = std::env::var("PB_CHANNEL_OFFSET").ok().and_then(|v| v.parse().ok()).unwrap_or(-1);
+    let sdk_ch = (ch as i64 + offset).max(0);
     let helper_child = Command::new(helper)
         .args([store.host.as_str(), &store.port.max(1).to_string(), &store.user, &store.pass,
-            &ch.to_string(), &start_sec.to_string(), &end_sec.to_string(), &max_sec.to_string()])
+            &sdk_ch.to_string(), &start_sec.to_string(), &end_sec.to_string(), &max_sec.to_string()])
         .env("PB_DOWNLOAD", dav.to_string_lossy().to_string())
         .env("LD_LIBRARY_PATH", sdk_lib)
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())

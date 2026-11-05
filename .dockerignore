@@ -1,0 +1,10 @@
+data/
+dist/
+.cargo/
+.rustup/
+.rust-tmp/
+rust/target/
+node_modules/
+.git/
+*.log
+bin/lark-cli

@@ -1,0 +1,15 @@
+services:
+  lilycam:
+    build: .
+    image: lilycam:latest
+    container_name: lilycam
+    restart: unless-stopped
+    ports:
+      - "8790:8790"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      PORT: "8790"
+      IDLE_SECS: "180"
+    volumes:
+      - ./data:/app/data
+      # đặt data/cameras.json + users.json của bạn vào ./data

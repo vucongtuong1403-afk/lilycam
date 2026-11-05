@@ -19,8 +19,8 @@ fn profile_of(name: &str) -> Option<Profile> {
         "g2" => Profile { width: 960, fps: 20, rate: 3000, crf: 22, threads: 2 },
         "g4" => Profile { width: 720, fps: 20, rate: 2500, crf: 23, threads: 2 },
         "g6" => Profile { width: 640, fps: 15, rate: 1800, crf: 24, threads: 2 },
-        "g8" => Profile { width: 640, fps: 15, rate: 1800, crf: 24, threads: 2 },
-        "g10" => Profile { width: 560, fps: 12, rate: 1400, crf: 25, threads: 2 },
+        "g8" => Profile { width: 640, fps: 15, rate: 1800, crf: 24, threads: 1 },
+        "g10" => Profile { width: 560, fps: 12, rate: 1400, crf: 25, threads: 1 },
         _ => return None,
     })
 }
@@ -33,6 +33,7 @@ struct Session {
 }
 
 pub struct Hls {
+    max: usize,
     ffmpeg: PathBuf,
     helper: PathBuf,
     sdk_lib: PathBuf,
@@ -47,7 +48,9 @@ impl Hls {
         let dir = base.join(format!("p{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let enabled = ffmpeg.exists();
-        Hls { ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled }
+        let max = std::env::var("MAX_STREAMS").ok().and_then(|v| v.parse().ok()).unwrap_or(20usize);
+        println!("  Giới hạn phiên: {max}");
+        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled }
     }
 
     /// Phát lại bản ghi qua NetSDK (hồ sơ pbNNN).
@@ -87,7 +90,7 @@ impl Hls {
     pub fn stats(&self) -> Value {
         let m = self.sessions.lock().unwrap();
         let by: Vec<String> = m.values().map(|s| s.profile.clone()).collect();
-        json!({ "sessions": m.len(), "max": 20, "idleSec": 180, "byProfile": by, "list": [] })
+        json!({ "sessions": m.len(), "max": self.max, "idleSec": 180, "byProfile": by, "list": [] })
     }
 
     /// Trả nội dung file trong phiên (tự mở phiên nếu chưa có, chờ tới khi có segment đầu).
@@ -115,6 +118,16 @@ impl Hls {
             s.last = Instant::now();
             return Some(s.dir.clone());
         }
+        // (A) quá trần phiên → đuổi phiên lâu không ai xem nhất
+        if m.len() >= self.max {
+            if let Some(victim) = m.iter().min_by_key(|(_, s)| s.last).map(|(k, _)| k.clone()) {
+                if let Some(mut old) = m.remove(&victim) {
+                    let _ = old.child.start_kill();
+                    let _ = std::fs::remove_dir_all(&old.dir);
+                    println!("[hls] đuổi {victim} (quá {} phiên)", self.max);
+                }
+            }
+        }
         let dir = self.base.join(format!("{}-{}", key, crate::auth::now_ms()));
         let _ = std::fs::create_dir_all(&dir);
         let url = format!("rtsp://{}:{}@{}:554/cam/realmonitor?channel={}&subtype=0",
@@ -131,8 +144,11 @@ impl Hls {
         if p.width > 0 {
             args.extend(["-vf".into(), format!("scale={}:-2:flags=lanczos,fps={}", p.width, p.fps)]);
         }
-        args.extend(["-g".into(), "10".into(),
-            "-force_key_frames".into(), "expr:gte(t,n_forced*0.5)".into(),
+        // (C) lưới dày dùng keyframe 1 giây: ít CPU/bitrate hơn
+        let kf = if profile == "g8" || profile == "g10" { "1" } else { "0.5" };
+        let gop = if kf == "1" { "12" } else { "10" };
+        args.extend(["-g".into(), gop.to_string(),
+            "-force_key_frames".into(), format!("expr:gte(t,n_forced*{kf})"),
             "-f".into(), "hls".into(),
             "-hls_time".into(), if profile == "hd" { "0.5".into() } else { "1".into() },
             "-hls_list_size".into(), if profile == "hd" { "8".into() } else { "6".into() },

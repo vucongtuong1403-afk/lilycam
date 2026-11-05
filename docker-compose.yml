@@ -18,5 +18,6 @@ services:
       - "992"   # GID của nhóm render trên máy này (getent group render)
     volumes:
       - ./data:/app/data
+      - ./public:/app/public   # sửa giao diện không cần build lại image
       - ${HOME}/.lark-cli:/root/.lark-cli
       - ${HOME}/.local/share/lark-cli:/root/.local/share/lark-cli

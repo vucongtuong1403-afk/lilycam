@@ -47,6 +47,21 @@ impl Hls {
     pub fn new(ffmpeg: PathBuf, helper: PathBuf, sdk_lib: PathBuf, base: PathBuf, _codecs: PathBuf) -> Hls {
         let dir = base.join(format!("p{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
+        // dọn segment cũ trong thư mục của chính tiến trình này
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() { let _ = std::fs::remove_file(e.path()); }
+        }
+        // dọn thư mục p* của các lần chạy trước (tránh tích rác như 23k thư mục)
+        if let Some(parent) = dir.parent() {
+            if let Ok(rd) = std::fs::read_dir(parent) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p != dir && p.file_name().map(|n| n.to_string_lossy().starts_with('p')).unwrap_or(false) {
+                        let _ = std::fs::remove_dir_all(&p);
+                    }
+                }
+            }
+        }
         let enabled = ffmpeg.exists();
         let max = std::env::var("MAX_STREAMS").ok().and_then(|v| v.parse().ok()).unwrap_or(20usize);
         println!("  Giới hạn phiên: {max}");

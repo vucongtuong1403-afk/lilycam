@@ -157,7 +157,11 @@ async fn main() {
     let users = Users::load(&data.join("users.json"));
     let secret = std::fs::read(data.join(".session-secret")).unwrap_or_else(|_| {
         let s: Vec<u8> = (0..48).map(|_| rand::random::<u8>()).collect();
-        let _ = std::fs::write(data.join(".session-secret"), &s);
+        let path = data.join(".session-secret");
+        let _ = std::fs::write(&path, &s);
+        // chỉ chủ sở hữu đọc được
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         s
     });
 

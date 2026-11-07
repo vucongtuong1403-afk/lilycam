@@ -46,8 +46,8 @@ Sửa xong khởi động lại: `Ctrl+C` rồi `./lilycam` (hoặc `systemctl r
 | Muốn đổi | Sửa ở |
 |---|---|
 | Cổng web | `PORT=9000 ./lilycam` |
-| Camera "ngủ" sau bao lâu | `IDLE_SECS=300 ./lilycam` (mặc định 180) |
-| Số phiên tối đa / phiên HD | `MAX_STREAMS=20 MAX_HD=3` |
+| Camera "ngủ" sau bao lâu | cố định 180 s trong `src/hls.rs` (chưa có biến môi trường) |
+| Số phiên tối đa | `MAX_STREAMS=12 ./lilycam` (code mặc định 20) |
 | Chất lượng hình (720p/crf/bitrate) | `src/hls.rs` → hằng `PROFILES`, rồi build lại |
 | Tỉ lệ khung mặc định (16:9) | `public/app.js` → `applyAspect(... || '16:9')` |
 | Giao diện, màu sắc | `public/styles.css`, `public/index.html` |

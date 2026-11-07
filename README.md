@@ -21,21 +21,22 @@ có **chế độ phóng to HD 1080p**. Không cần SmartPSS, không cần plug
 
 ```bash
 cd "$HOME/Camera xịn vãi "   # thư mục dự án (tên có dấu cách ở cuối)
-node server.js            # http://localhost:8790
+docker compose up -d --build     # http://localhost:8790
 ```
 
-Hoặc chạy nền:
+Lần đầu build 5–10 phút (biên dịch Rust); các lần sau tức thì. Xem log / dừng:
 
 ```bash
-./start.sh                # ghi log vào server.log
+docker compose logs -f --tail 50
+docker compose down
 ```
 
 Mở `http://localhost:8790` (trong LAN: `http://<IP-máy-chạy>:8790`).
 
-Tài khoản mặc định: **admin** — mật khẩu in ra ở lần chạy đầu tiên (lưu dạng hash scrypt
-trong `data/users.json`, không lưu plaintext).
+Tài khoản mặc định: **admin** — mật khẩu lưu dạng hash scrypt trong `data/users.json`.
 
-Quên mật khẩu: `node server.js --reset-password`. Đổi cổng: `PORT=9000 node server.js`.
+Quên mật khẩu: `docker compose exec lilycam ./lilycam --reset-password`.
+Đổi cổng: sửa `ports` trong `docker-compose.yml`.
 
 ---
 
@@ -150,16 +151,16 @@ Lưới 2/4/6/8/10 ô cũng lấy luồng chính, server thu nhỏ sẵn cho v�
 - Luồng chính không mở được (mạng yếu, đầu ghi từ chối) → ô đó **tự** hiện ảnh/MJPEG rồi
   thử lại luồng chính ở lần sau, không cần bấm gì.
 - Mỗi phiên = 1 tiến trình `bin/ffmpeg` (~0,2 core cho ô 720p, ~0,5–1 core cho HD 1080p).
-  Tối đa **20 phiên** (`MAX_STREAMS`), **3 phiên HD** (`MAX_HD`).
+  Tối đa **12 phiên** (`MAX_STREAMS`, đặt trong `docker-compose.yml`; code mặc định 20).
 
 ### Chế độ ngủ (tiết kiệm băng thông)
 
 - Mở web **không tự chạy camera nào**: chỉ khi bấm vào một cửa hàng thì lưới của cửa hàng đó mới mở luồng.
 - Không ai xem quá **3 phút** → phiên tự "ngủ": ffmpeg tắt, kết nối RTSP tới đầu ghi đóng, thư mục tạm xoá.
-  Đổi thời gian bằng biến môi trường, ví dụ `IDLE_SECS=60` (giây) trong unit systemd.
+  Thời gian ngủ cố định **180 giây** trong code (`src/hls.rs`), chưa có biến môi trường.
 - Khi mở cửa sổ xem một camera, các phiên lưới của cùng cửa hàng được nhả ngay (`/api/release`) để
-  nhường băng thông; khi đủ 20 phiên thì phiên **lâu không ai xem nhất** bị đuổi trước.
-- Thay bằng ffmpeg khác: `FFMPEG=/usr/bin/ffmpeg node server.js`.
+  nhường băng thông; khi đủ số phiên tối đa thì phiên **lâu không ai xem nhất** bị đuổi trước.
+- Thay bằng ffmpeg khác: đặt `FFMPEG=/usr/bin/ffmpeg` trong `environment` của `docker-compose.yml`.
 
 ### Tỉ lệ khung hình
 
@@ -232,7 +233,7 @@ Mỗi ô lưới là một phiên HLS riêng (`/hls/g4/...`, `g6`, `g10`…) do 
 ô phóng to dùng `/hls/hd/...` giữ nguyên độ phân giải. Lưới **8–10 ô lấy luồng phụ**
 (`subtype=1`) của đầu ghi — ô chỉ ~300 px nên không cần 1080p, đổi lại CPU server giảm ~3 lần
 và đầu ghi không bị nghẽn upload; đầu ghi nào không có luồng phụ thì tự quay về luồng chính.
-Tối đa 20 phiên cùng lúc, tối đa 3 phiên HD; phiên không ai xem tự tắt sau 3 phút (`IDLE_SECS`).
+Tối đa 12 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt sau 3 phút (cố định trong code).
 
 ---
 
@@ -280,23 +281,23 @@ Cấu hình nguồn: `data/source.json`.
 
 ```
 Camera xịn vãi /
-├── server.js           # HTTP server + API + phân quyền (không npm dependency)
-├── lib/dahua.js        # client HTTP Digest cho đầu ghi Dahua
-├── lib/hls.js          # quản lý phiên ffmpeg → HLS (HD)
-├── lib/jpeg.js         # đọc kích thước khung hình JPEG
+├── Dockerfile, docker-compose.yml   # bản chính: Rust + Docker
+├── rust/src/           # server Rust (axum): API, HLS, Dahua, NetSDK, Lark
+├── public/             # giao diện (index.html, styles.css, app.js, hls.light)
 ├── bin/ffmpeg          # ffmpeg static (kèm sẵn)
-├── public/
-│   ├── index.html, styles.css, app.js
-│   └── vendor/hls.light.min.js
-├── data/
-│   ├── cameras.json    # 37 cơ sở: host, cổng, user, pass, số camera (đã dò thực tế)
+├── bin/dahua-pb        # helper NetSDK (xem lại bản ghi)
+├── bin/lark-cli        # CLI gửi ảnh sang Lark
+├── sdk/lib/            # Dahua NetSDK (Linux x64)
+├── data/               # dữ liệu thật (không commit)
+│   ├── cameras.json    # 37 cơ sở: host, cổng, user, pass, số camera
 │   ├── users.json, source.json, .session-secret
-│   └── hls/            # thư mục tạm của ffmpeg (tự dọn)
-├── sync-lark.js
-└── start.sh
+│   └── hls/, pb/       # thư mục tạm của ffmpeg (tự dọn)
+├── legacy/             # bản Node.js cũ + bộ đóng gói portable (tham chiếu)
+└── tools/              # backup.sh, bench, script phụ
 ```
 
-Yêu cầu: Node.js ≥ 18, Linux x86_64 (cho `bin/ffmpeg`). Không cần `npm install`.
+Yêu cầu: Docker (hoặc Docker Desktop trên Windows) — image đã kèm ffmpeg, NetSDK, lark-cli.
+Không cần cài Node.js, ffmpeg hay SDK lên máy.
 
 ---
 
@@ -305,7 +306,7 @@ Yêu cầu: Node.js ≥ 18, Linux x86_64 (cho `bin/ffmpeg`). Không cần `npm i
 ```bash
 python3 tools/bench.py --port 8790 --hd 8 --token "$TOKEN"   # đo DNS/TCP/snapshot/HD
 curl -s -H "Cookie: lilycam_sid=$TOKEN" localhost:8790/api/stats   # phiên đang chạy, RAM
-./tools/restart.sh                                            # khởi động lại chắc chắn (chờ cổng trống)
+docker compose restart lilycam                                # khởi động lại container
 ```
 
 Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) · dữ liệu thô: `docs/bench.json`.
@@ -317,10 +318,10 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | Ô camera “Không có tín hiệu”, banner đỏ | Đầu ghi mất mạng, DDNS sai, cổng forward đóng. Bấm **Thử lại** hoặc sửa bằng nút bút chì |
 | HD cứ tự về “Nhẹ” | Đầu ghi không mở RTSP 554, mạng yếu, hoặc trình duyệt không có H.264 (Chromium thuần). Dùng Chrome/Edge/Safari |
 | Lần đầu mở HD chậm 4–6 giây | ffmpeg phải dò codec + chờ keyframe; các lần sau nhanh hơn |
-| Máy nóng / CPU cao | Giảm `MAX_STREAMS` / `MAX_HD`, chọn lưới ít ô hơn, hoặc dùng chế độ Nhẹ |
+| Máy nóng / CPU cao | Giảm `MAX_STREAMS`, chọn lưới ít ô hơn, hoặc dùng chế độ Nhẹ |
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |
-| Quên mật khẩu | `node server.js --reset-password` |
+| Quên mật khẩu | `docker compose exec lilycam ./lilycam --reset-password` |
 
 ---
 

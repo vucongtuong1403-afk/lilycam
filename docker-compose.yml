@@ -9,8 +9,8 @@ services:
     environment:
       TZ: Asia/Ho_Chi_Minh
       PORT: "8790"
-      IDLE_SECS: "180"
       # trần phiên: quá 12 thì đuổi phiên lâu nhất, tránh 10 ô + HD làm CPU vọt
+      # (bản Rust chỉ đọc MAX_STREAMS; thời gian ngủ 180 s nằm trong code)
       MAX_STREAMS: "12"
     devices:
       - /dev/dri:/dev/dri

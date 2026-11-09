@@ -160,7 +160,9 @@ impl Hls {
             // luồng xem 1 camera: kèm âm thanh nếu đầu ghi có (AAC, mono)
             args.extend(["-map".into(), "0:v:0".into(), "-map".into(), "0:a:0?".into(),
                 "-c:a".into(), "aac".into(), "-b:a".into(), "64k".into(),
-                "-ar".into(), "44100".into(), "-ac".into(), "1".into()]);
+                "-ar".into(), "44100".into(), "-ac".into(), "1".into(),
+                // micro đầu ghi thường rất nhỏ (~-34 dB) → nâng +8 dB cho dễ nghe
+                "-af".into(), "volume=8dB".into()]);
         } else {
             args.push("-an".into());
         }

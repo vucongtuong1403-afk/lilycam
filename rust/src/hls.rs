@@ -155,7 +155,15 @@ impl Hls {
             "-maxrate".into(), format!("{}k", p.rate), "-bufsize".into(), format!("{}k", p.rate * 2),
             "-profile:v".into(), "main".into(), "-bf".into(), "2".into(),
             "-x264-params".into(), "aq-mode=2".into(),
-            "-pix_fmt".into(), "yuv420p".into(), "-an".into()]);
+            "-pix_fmt".into(), "yuv420p".into()]);
+        if profile == "hd" {
+            // luồng xem 1 camera: kèm âm thanh nếu đầu ghi có (AAC, mono)
+            args.extend(["-map".into(), "0:v:0".into(), "-map".into(), "0:a:0?".into(),
+                "-c:a".into(), "aac".into(), "-b:a".into(), "64k".into(),
+                "-ar".into(), "44100".into(), "-ac".into(), "1".into()]);
+        } else {
+            args.push("-an".into());
+        }
         if p.width > 0 {
             args.extend(["-vf".into(), format!("scale={}:-2:flags=lanczos,fps={}", p.width, p.fps)]);
         }

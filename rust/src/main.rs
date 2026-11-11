@@ -156,7 +156,19 @@ async fn main() {
 
     let stores = load_stores(&data.join("cameras.json"));
     let by_id = stores.iter().map(|s| (s.id.clone(), s.clone())).collect();
-    let users = Users::load(&data.join("users.json"));
+    let users = {
+        let mut u = Users::load(&data.join("users.json"));
+        if u.list.is_empty() {
+            // cài mới: tự tạo admin để không bị "không đăng nhập được"
+            let pass = format!("Lily@{:08x}", rand::random::<u32>());
+            if set_password(&data, "admin", &pass).is_ok() {
+                println!("  Chưa có tài khoản — đã tạo 'admin', mật khẩu: {pass}");
+                println!("  (đổi: ./lilycam --set-password admin MatKhauMoi)");
+            }
+            u = Users::load(&data.join("users.json"));
+        }
+        u
+    };
     let secret = std::fs::read(data.join(".session-secret")).unwrap_or_else(|_| {
         let s: Vec<u8> = (0..48).map(|_| rand::random::<u8>()).collect();
         let path = data.join(".session-secret");

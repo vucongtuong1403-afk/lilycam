@@ -16,14 +16,19 @@ tar xzf lilycam-*.tar.gz && cd lilycam-*
 ./lilycam                      # http://localhost:8790
 ```
 
-Lần chạy đầu, đặt mật khẩu quản trị:
+**Đăng nhập mặc định của gói:** xem file `MAT-KHAU.txt` ngay trong thư mục vừa giải nén
+(tài khoản luôn là `admin`, mật khẩu do lúc đóng gói sinh ra).
+
+Muốn đổi sang mật khẩu riêng (khuyến nghị):
 
 ```bash
-./lilycam --reset-password admin    # in ra mật khẩu ngẫu nhiên
-./lilycam --set-password admin 12345678
+./lilycam --set-password admin MatKhauCuaBan
 ```
 
-rồi tải lại trang, đăng nhập `admin` + mật khẩu vừa đặt.
+rồi khởi động lại `./lilycam` và đăng nhập `admin` + mật khẩu vừa đặt.
+
+> Lưu ý: `--reset-password admin` sẽ **sinh mật khẩu ngẫu nhiên mới** (in ra màn hình) —
+> chỉ dùng khi quên mật khẩu. Đừng chạy nếu bạn đang dùng mật khẩu trong `MAT-KHAU.txt`.
 
 ## 3. Đổi sang camera của bạn
 

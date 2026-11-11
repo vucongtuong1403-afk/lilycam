@@ -45,7 +45,16 @@ json.dump(d, open(dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 
 echo "→ tài khoản admin mới"
-( cd "$OUT" && ./lilycam --reset-password admin | sed 's/^/    /' )
+( cd "$OUT" && ./lilycam --reset-password admin | tee /tmp/lilycam-pass.txt | sed 's/^/    /' )
+{
+  echo "LilyCam — tài khoản mặc định của gói này"
+  echo "----------------------------------------"
+  echo "  Tên đăng nhập : admin"
+  echo "  Mật khẩu      : $(grep -o 'pass: .*' /tmp/lilycam-pass.txt | sed 's/pass: //')"
+  echo
+  echo "Đổi mật khẩu:  ./lilycam --set-password admin MatKhauMoi"
+  echo "(chạy trong chính thư mục này, rồi khởi động lại ./lilycam)"
+} > "$OUT/MAT-KHAU.txt"
 
 echo "→ tài liệu cài đặt"
 cp "$ROOT/rust/INSTALL.md" "$OUT/INSTALL.md"

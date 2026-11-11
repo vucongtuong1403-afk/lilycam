@@ -30,13 +30,17 @@ for s in d.get("stores", []):
 json.dump(d, open(dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 print("   ", len(d.get("stores", [])), "cơ sở, đã để trống mật khẩu")
 PY
-cp "$ROOT/data/dm.ndjson" "$OUT/data/dm.ndjson" 2>/dev/null || true
-cp "$ROOT/data/lark-views.json" "$OUT/data/lark-views.json" 2>/dev/null || true
+: > "$OUT/data/dm.ndjson"          # không kèm danh bạ nội bộ
+echo '{}' > "$OUT/data/lark-views.json"
 python3 - "$ROOT/data/lark.json" "$OUT/data/lark.json" <<'PY'
 import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 d = json.load(open(src, encoding="utf-8"))
 d["enabled"] = False
+# không kèm base/bảng thật của công ty
+for k in ("base_token", "table_id", "cli", "base", "table"):
+    if k in d:
+        d[k] = ""
 json.dump(d, open(dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 

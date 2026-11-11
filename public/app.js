@@ -2284,3 +2284,96 @@ $('#clipGo').addEventListener('click', () => {
   a.remove();
   $('#clipLen').textContent = 'Đang tạo clip (có thể mất vài chục giây)… trình duyệt sẽ hỏi nơi lưu.';
 });
+
+/* ---------------- Sức khỏe camera + thêm đầu ghi ---------------- */
+async function loadHealth() {
+  const el = $('#healthList');
+  el.textContent = 'Đang tải…';
+  try {
+    const d = await api('/api/cameras/health');
+    const list = (d && d.stores) || [];
+    el.textContent = '';
+    if (!list.length) {
+      el.textContent = 'Chưa có dữ liệu — lần quét đầu đang chạy, thử lại sau 1 phút.';
+      $('#healthSub').textContent = '';
+      return;
+    }
+    const bad = list.filter((s) => !s.ok).length;
+    $('#healthSub').textContent = list.length + ' cơ sở · ' + bad + ' mất kết nối';
+    list.sort((a, b) => (a.ok === b.ok ? a.name.localeCompare(b.name) : a.ok ? 1 : -1));
+    for (const s of list) {
+      const row = document.createElement('div');
+      row.className = 'health-row';
+      const dot = document.createElement('span');
+      dot.className = 'hdot ' + (s.ok ? 'ok' : 'bad');
+      const nm = document.createElement('span');
+      nm.className = 'hname';
+      nm.textContent = s.name;
+      const st = document.createElement('span');
+      st.className = 'hstate';
+      st.textContent = s.ok ? 'OK' : 'MẤT KẾT NỐI';
+      const scan = document.createElement('button');
+      scan.className = 'btn btn-ghost hscan';
+      scan.type = 'button';
+      scan.textContent = 'Quét kênh';
+      scan.addEventListener('click', async () => {
+        scan.disabled = true;
+        scan.textContent = 'Đang quét…';
+        try {
+          const r = await api('/api/cameras/health/' + encodeURIComponent(s.id));
+          const dead = r.channels.filter((c) => !c.ok).map((c) => c.ch);
+          const box = document.createElement('div');
+          box.className = 'hchans';
+          box.textContent = r.channels.map((c) => 'CH' + c.ch + (c.ok ? ' ✔' : ' ✘')).join('   ')
+            + (dead.length ? '   → chết: ' + dead.join(', ') : '   → tất cả OK');
+          row.append(box);
+        } catch (e) {
+          scan.textContent = 'Lỗi';
+        }
+        scan.disabled = false;
+        scan.textContent = 'Quét kênh';
+      });
+      row.append(dot, nm, st, scan);
+      el.append(row);
+    }
+  } catch (e) {
+    el.textContent = 'Không tải được: ' + e.message;
+  }
+}
+
+$('#healthBtn').addEventListener('click', () => { $('#healthDialog').hidden = false; loadHealth(); });
+$('#healthDialog').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) $('#healthDialog').hidden = true; });
+$('#healthReload').addEventListener('click', loadHealth);
+$('#addStoreBtn').addEventListener('click', () => {
+  $('#healthDialog').hidden = true;
+  $('#nsMsg').textContent = '';
+  $('#addStoreDialog').hidden = false;
+});
+$('#addStoreDialog').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) $('#addStoreDialog').hidden = true; });
+
+$('#nsGo').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget;
+  b.disabled = true;
+  b.textContent = 'Đang quét kênh…';
+  const body = {
+    name: $('#nsName').value.trim(),
+    host: $('#nsHost').value.trim(),
+    port: Number($('#nsPort').value) || 80,
+    user: $('#nsUser').value.trim() || 'admin',
+    pass: $('#nsPass').value,
+    channels: $('#nsChannels').value.trim() || '1-8',
+    unit: $('#nsUnit').value.trim() || 'Cửa hàng',
+    region: $('#nsRegion').value.trim() || 'Bắc',
+  };
+  try {
+    const r = await api('/api/stores', { method: 'POST', body: JSON.stringify(body) });
+    $('#nsMsg').textContent = 'Đã thêm "' + r.id + '" với ' + r.channels.length
+      + ' kênh có tín hiệu (' + r.channels.join(', ') + '). Hệ thống khởi động lại sau 1–2 giây…';
+    setTimeout(() => location.reload(), 8000);
+  } catch (e) {
+    $('#nsMsg').textContent = 'Lỗi: ' + e.message;
+    b.disabled = false;
+    b.textContent = 'Thêm & quét kênh';
+  }
+});
+

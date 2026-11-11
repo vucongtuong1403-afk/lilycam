@@ -56,6 +56,8 @@ pub struct App {
     pub login_attempts: std::sync::Mutex<HashMap<String, (u32, i64)>>,
     /// Bản ghi đã sửa qua hộp thoại "Sửa thông tin kết nối" (đè lên cameras.json trong RAM).
     pub overrides: std::sync::Mutex<HashMap<String, Store>>,
+    /// Kết quả dò sức khỏe camera (nền 10 phút/lần).
+    pub cam_health: std::sync::Mutex<Value>,
 }
 
 static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -174,8 +176,9 @@ async fn main() {
     let zones = lark::Zones::load(&zones_path);
     let lark = lark::Lark::load(&data);
 
-    let app = Arc::new(App { root, data, public, ffmpeg, stores, by_id, users, secret, hls, snap, zones, lark, zones_path, codes: Default::default(), login_attempts: Default::default(), overrides: Default::default() });
+    let app = Arc::new(App { root, data, public, ffmpeg, stores, by_id, users, secret, hls, snap, zones, lark, zones_path, codes: Default::default(), login_attempts: Default::default(), overrides: Default::default(), cam_health: Default::default() });
 
+    spawn_health(app.clone());
     let router = Router::new()
         .route("/api/health", get(api_health))
         .route("/api/login", post(api_login))
@@ -190,6 +193,9 @@ async fn main() {
         .route("/api/ptz/{store}/{ch}", post(api_ptz))
         .route("/api/storecfg/{store}", get(api_storecfg))
         .route("/api/stores/{store}", put(api_store_put))
+        .route("/api/stores", post(api_store_new))
+        .route("/api/cameras/health", get(api_cam_health))
+        .route("/api/cameras/health/{store}", get(api_cam_health_one))
         .route("/api/warm/{store}/{ch}", post(api_warm))
         .route("/api/release/{store}", post(api_release))
         .route("/api/probe/{store}", post(api_probe))
@@ -692,3 +698,168 @@ async fn api_clip(State(app): State<Arc<App>>, headers: HeaderMap, Query(q): Que
         axum::body::Bytes::from(bytes),
     ).into_response()
 }
+
+
+/// Mở thử 1 kênh RTSP, lấy 1 khung hình → coi như kênh "sống".
+async fn probe_rtsp(ffmpeg: &std::path::Path, s: &Store, ch: u32) -> bool {
+    let url = format!("rtsp://{}:{}@{}:554/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, ch);
+    let mut cmd = tokio::process::Command::new(ffmpeg);
+    cmd.args(["-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "6000000",
+            "-i", &url, "-frames:v", "1", "-f", "null", "-"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    match cmd.spawn() {
+        Ok(mut c) => match tokio::time::timeout(std::time::Duration::from_secs(9), c.wait()).await {
+            Ok(Ok(st)) => st.success(),
+            _ => { let _ = c.start_kill(); false }
+        },
+        Err(_) => false,
+    }
+}
+
+/// Vòng nền: mỗi 10 phút dò kênh đầu của từng cơ sở để biết online/offline.
+fn spawn_health(app: Arc<App>) {
+    tokio::spawn(async move {
+        loop {
+            let mut items = Vec::new();
+            for chunk in app.stores.chunks(6) {
+                let mut handles = Vec::new();
+                for s in chunk {
+                    let ff = app.ffmpeg.clone();
+                    let st = s.clone();
+                    handles.push(tokio::spawn(async move {
+                        // thử kênh đầu; nếu chết thử thêm 2 kênh kế (kênh 1 có thể bị tắt)
+                        let list: Vec<u32> = st.channels.clone().unwrap_or_else(|| (1..=st.cameras.max(1)).collect());
+                        let mut ch = list.first().copied().unwrap_or(1);
+                        let mut ok = false;
+                        for cand in list.iter().take(3) {
+                            if probe_rtsp(&ff, &st, *cand).await { ch = *cand; ok = true; break; }
+                        }
+                        json!({ "id": st.id, "name": st.name, "ch": ch, "ok": ok,
+                            "at": crate::auth::now_ms() })
+                    }));
+                }
+                for h in handles {
+                    if let Ok(v) = h.await { items.push(v); }
+                }
+            }
+            if let Ok(mut m) = app.cam_health.lock() {
+                *m = json!({ "updatedAt": crate::auth::now_ms(), "stores": items });
+            }
+            println!("[health] quét xong {} cơ sở", app.stores.len());
+            tokio::time::sleep(std::time::Duration::from_secs(900)).await;
+        }
+    });
+}
+
+/// "1,3,5-8" → [1,3,5,6,7,8]
+fn parse_channels(spec: &str) -> Vec<u32> {
+    let mut out: Vec<u32> = Vec::new();
+    for part in spec.split(',') {
+        let p = part.trim();
+        if p.is_empty() { continue; }
+        if let Some((a, b)) = p.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>()) {
+                for n in a..=b.min(a + 63) { out.push(n); }
+            }
+        } else if let Ok(n) = p.parse::<u32>() { out.push(n); }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out.retain(|n| *n > 0 && *n <= 64);
+    out
+}
+
+fn slugify(name: &str) -> String {
+    let mut s = String::new();
+    let mut dash = false;
+    for ch in name.chars() {
+        let c = ch.to_lowercase().next().unwrap_or(' ');
+        if c.is_ascii_alphanumeric() { s.push(c); dash = false; }
+        else if !dash && !s.is_empty() { s.push('-'); dash = true; }
+    }
+    while s.ends_with('-') { s.pop(); }
+    if s.is_empty() { "co-so-moi".into() } else { s }
+}
+
+async fn api_cam_health(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if app.user_of(&headers).is_none() {
+        return err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập");
+    }
+    let doc = app.cam_health.lock().map(|m| m.clone()).unwrap_or(Value::Null);
+    json_res(StatusCode::OK, doc)
+}
+
+/// Quét sâu toàn bộ kênh của 1 cơ sở (bấm nút "Quét kênh").
+async fn api_cam_health_one(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+    if app.user_of(&headers).is_none() {
+        return err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập");
+    }
+    let s = match app.store(&id) { Some(s) => s, None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    let chans = s.channels.clone().unwrap_or_else(|| (1..=s.cameras.max(1)).collect::<Vec<u32>>());
+    let mut out = Vec::new();
+    for ch in chans {
+        let ok = probe_rtsp(&app.ffmpeg, &s, ch).await;
+        out.push(json!({ "ch": ch, "ok": ok }));
+    }
+    json_res(StatusCode::OK, json!({ "id": s.id, "name": s.name, "port": s.port, "channels": out }))
+}
+
+/// Thêm đầu ghi mới (dải kênh "1,3,5-8"); chỉ lưu kênh thật sự có hình.
+async fn api_store_new(State(app): State<Arc<App>>, headers: HeaderMap, body: String) -> Response {
+    if app.user_of(&headers).is_none() {
+        return err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập");
+    }
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    let host = v.get("host").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    let user = v.get("user").and_then(|x| x.as_str()).unwrap_or("admin").trim().to_string();
+    let pass = v.get("pass").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let unit = v.get("unit").and_then(|x| x.as_str()).unwrap_or("Cửa hàng").trim().to_string();
+    let region = v.get("region").and_then(|x| x.as_str()).unwrap_or("Bắc").trim().to_string();
+    let port = v.get("port").and_then(|p| p.as_u64().or_else(|| p.as_str().and_then(|t| t.parse().ok()))).unwrap_or(80) as u16;
+    let spec = v.get("channels").and_then(|x| x.as_str()).unwrap_or("1-8");
+    if name.len() < 3 { return err_res(StatusCode::BAD_REQUEST, "Tên cơ sở quá ngắn"); }
+    if host.is_empty() || pass.is_empty() { return err_res(StatusCode::BAD_REQUEST, "Thiếu host hoặc mật khẩu"); }
+    let channels = parse_channels(spec);
+    if channels.is_empty() { return err_res(StatusCode::BAD_REQUEST, "Dải kênh không hợp lệ (ví dụ: 1-8 hoặc 1,3,5-8)"); }
+    let id = v.get("id").and_then(|x| x.as_str()).map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty()).unwrap_or_else(|| slugify(&name));
+
+    let probe_store = Store { id: id.clone(), name: name.clone(), unit: unit.clone(), host: host.clone(),
+        port, user: user.clone(), pass: pass.clone(), cameras: channels.len() as u32,
+        plan: None, verified: true, note: None, channels: Some(channels.clone()), allowed_users: None };
+    let mut live: Vec<u32> = Vec::new();
+    for ch in channels.iter() {
+        if probe_rtsp(&app.ffmpeg, &probe_store, *ch).await { live.push(*ch); }
+    }
+    if live.is_empty() {
+        return err_res(StatusCode::BAD_REQUEST, "Không kênh nào có tín hiệu — kiểm tra host / tài khoản / mật khẩu");
+    }
+
+    let path = app.data.join("cameras.json");
+    let mut doc = read_json(&path).unwrap_or_else(|| json!({ "stores": [] }));
+    if !doc.get("stores").map(|x| x.is_array()).unwrap_or(false) { doc["stores"] = json!([]); }
+    if let Some(arr) = doc.get("stores").and_then(|x| x.as_array()) {
+        if arr.iter().any(|it| it.get("id").and_then(|x| x.as_str()) == Some(id.as_str())) {
+            return err_res(StatusCode::CONFLICT, "Mã cơ sở này đã tồn tại");
+        }
+    }
+    if let Some(arr) = doc.get_mut("stores").and_then(|x| x.as_array_mut()) {
+        arr.push(json!({
+            "id": id, "name": name, "unit": unit, "region": region,
+            "host": host, "port": port, "user": user, "pass": pass,
+            "cameras": live.len(), "activeChannels": live.clone()
+        }));
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&doc) { let _ = std::fs::write(&path, text); }
+    println!("[stores] thêm {id} · {name} · {} kênh", live.len());
+    // khởi động lại tiến trình để nạp danh sách mới (Docker tự bật lại)
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        std::process::exit(0);
+    });
+    json_res(StatusCode::OK, json!({ "ok": true, "id": id, "channels": live, "restarting": true }))
+}
+

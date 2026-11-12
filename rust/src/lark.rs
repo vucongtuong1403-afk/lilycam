@@ -100,6 +100,9 @@ const DEFAULT_CATEGORIES: [&str; 17] = [
     "ĐỒNG PHỤC", "BPGS TEST", "TUÂN THỦ QUY TRÌNH ĐỒNG BỘ SẢN PHẢM",
     "QUY TRÌNH ĐỒNG BỘ SẢN PHẢM", "TUÂN THỦ QUY ĐỊNH PHÒNG ĂN", "TEST",
 ];
+/// Bảng "Danh mục trưởng bộ phận" trong base — nguồn tên cơ sở → nhóm chat + CHT.
+const DEFAULT_DIR_TABLE: &str = "tbl0QTtu2Ne6UUa9";
+
 const DEFAULT_ITEMS: [&str; 10] = [
     "BÃI ĐỂ XE", "KHO HÀNG", "THU NGÂN", "CƠ SỞ VẬT CHẤT", "KHU VỰC ĐO KHÁM",
     "KHU VỰC CẮT MẮT", "WC", "DIỆN MẠO CỬA HÀNG", "TRƯNG BÀY", "KHÔNG GIAN",
@@ -116,8 +119,18 @@ pub struct Lark {
     fallback_view: Option<String>,
     chat: HashMap<String, String>,
     cht: HashMap<String, String>,
+    /// store id → chat_id (nhóm chat của cơ sở trong bảng Giám sát tháng)
+    chat_by_id: HashMap<String, String>,
+    /// store id → open_id cửa hàng trưởng
+    cht_by_id: HashMap<String, String>,
     /// chat_id → open_id người chịu trách nhiệm, học từ các dòng đã có trong bảng
     cht_by_chat: Mutex<HashMap<String, String>>,
+    /// tên cơ sở (đã bỏ dấu) → chat_id, học từ bảng "Danh mục trưởng bộ phận"
+    chat_by_name: Mutex<HashMap<String, String>>,
+    /// tên cơ sở (đã bỏ dấu) → open_id cửa hàng trưởng, học từ cùng bảng đó
+    cht_by_name: Mutex<HashMap<String, String>>,
+    /// bảng danh mục (tuỳ chọn): tên cơ sở, chat_id, người chịu trách nhiệm
+    dir_table: String,
     dir_at: Mutex<Option<Instant>>,
     options: Mutex<Option<(Instant, Value)>>,
 }
@@ -135,7 +148,18 @@ impl Lark {
     pub fn load(data: &Path) -> Lark {
         let cfg: Value = std::fs::read_to_string(data.join("lark.json")).ok()
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
-        let cli = cfg.get("cli").and_then(|x| x.as_str()).map(PathBuf::from).unwrap_or_default();
+        // Đường dẫn lark-cli: ưu tiên cấu hình, nhưng data/lark.json hay bị copy nguyên
+        // đường dẫn của máy này sang container (…/bin/lark-cli) nên phải dò thêm vài chỗ.
+        let mut cli = cfg.get("cli").and_then(|x| x.as_str()).map(PathBuf::from).unwrap_or_default();
+        if !cli.as_os_str().is_empty() && !cli.exists() {
+            let mut cands: Vec<PathBuf> = vec![PathBuf::from("/app/bin/lark-cli")];
+            if let Some(root) = data.parent() { cands.push(root.join("bin/lark-cli")); }
+            if let Ok(p) = std::env::var("LARK_CLI") { cands.push(PathBuf::from(p)); }
+            if let Some(hit) = cands.into_iter().find(|p| p.exists()) {
+                println!("[lark] không thấy {} — dùng {}", cli.display(), hit.display());
+                cli = hit;
+            }
+        }
         let views: Value = std::fs::read_to_string(data.join("lark-views.json")).ok()
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
         let mut view_for = HashMap::new();
@@ -188,6 +212,21 @@ impl Lark {
                 }
             }
         }
+        // Bản đồ cơ sở → nhóm chat / cửa hàng trưởng, sinh bởi  lilycam --refresh-lark
+        // (khoá là id cơ sở trong cameras.json nên không phụ thuộc cách đặt tên).
+        let mut chat_by_id = HashMap::new();
+        let mut cht_by_id = HashMap::new();
+        if let Ok(raw) = std::fs::read_to_string(data.join("lark-chats.json")) {
+            if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                for (key, field) in [("chats", &mut chat_by_id), ("cht", &mut cht_by_id)] {
+                    if let Some(map) = v.get(key).and_then(|x| x.as_object()) {
+                        for (k, val) in map {
+                            if let Some(s) = val.as_str() { if !s.is_empty() { field.insert(k.clone(), s.to_string()); } }
+                        }
+                    }
+                }
+            }
+        }
         Lark {
             enabled: !cli.as_os_str().is_empty() && cli.exists(),
             cli,
@@ -195,57 +234,111 @@ impl Lark {
             table_id: cfg.get("table_id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
             base_url: cfg.get("base_url").and_then(|x| x.as_str()).map(String::from),
             photo_field: cfg.get("photo_field").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            view_for, fallback_view, chat, cht,
-            cht_by_chat: Mutex::new(HashMap::new()), dir_at: Mutex::new(None),
+            view_for, fallback_view, chat, cht, chat_by_id, cht_by_id,
+            cht_by_chat: Mutex::new(HashMap::new()),
+            chat_by_name: Mutex::new(HashMap::new()),
+            cht_by_name: Mutex::new(HashMap::new()),
+            dir_table: cfg.get("dir_table").and_then(|x| x.as_str()).unwrap_or(DEFAULT_DIR_TABLE).to_string(),
+            dir_at: Mutex::new(None),
             options: Mutex::new(None),
         }
     }
 
-    pub fn chat_count(&self) -> usize { self.chat.len() }
-
-    pub fn chat_of(&self, name: &str) -> Option<String> {
-        self.chat.get(&norm(name)).cloned().or_else(|| self.chat.get(&loose(name)).cloned())
+    pub fn chat_count(&self) -> usize {
+        let learned = self.chat_by_name.lock().map(|m| m.len() / 2).unwrap_or(0);
+        self.chat_by_id.len().max(self.chat.len()).max(learned)
     }
 
-    /// Open ID của cửa hàng trưởng: ưu tiên dm.ndjson, thiếu thì học từ bảng Giám sát tháng.
-    pub async fn cht_of(&self, name: &str) -> Option<String> {
+    /// Nhóm chat của cơ sở: ưu tiên bản đồ theo id (lark-chats.json), rồi danh mục
+    /// trưởng bộ phận trên Lark, cuối cùng là dm.ndjson/stores.json.
+    pub fn chat_of(&self, store_id: &str, name: &str) -> Option<String> {
+        self.chat_by_id.get(store_id).cloned()
+            .or_else(|| self.chat_by_name.lock().ok().and_then(|m|
+                m.get(&norm(name)).cloned().or_else(|| m.get(&loose(name)).cloned())))
+            .or_else(|| self.chat.get(&norm(name)).cloned())
+            .or_else(|| self.chat.get(&loose(name)).cloned())
+    }
+
+    /// Open ID của cửa hàng trưởng: ưu tiên bản đồ theo id, rồi danh mục trưởng bộ phận
+    /// trên Lark, rồi dm.ndjson/stores.json, cuối cùng là học từ các dòng đã có trong bảng.
+    pub async fn cht_of(&self, store_id: &str, name: &str) -> Option<String> {
+        if let Some(id) = self.cht_by_id.get(store_id).cloned() {
+            return Some(id);
+        }
         if let Some(id) = self.cht.get(&norm(name)).cloned().or_else(|| self.cht.get(&loose(name)).cloned()) {
             return Some(id);
         }
         self.learn_cht().await;
-        let chat = self.chat_of(name)?;
+        if let Some(id) = self.cht_by_name.lock().ok().and_then(|m|
+            m.get(&norm(name)).cloned().or_else(|| m.get(&loose(name)).cloned()))
+        {
+            return Some(id);
+        }
+        let chat = self.chat_of(store_id, name)?;
         self.cht_by_chat.lock().ok()?.get(&chat).cloned()
     }
 
-    /// Đọc bảng Giám sát tháng để biết ai từng là người chịu trách nhiệm của từng nhóm chat.
+    /// Nạp sẵn danh mục (gọi lúc khởi động để lần chụp ảnh đầu tiên không phải chờ).
+    pub async fn warm(&self) {
+        if self.enabled { self.learn_cht().await; }
+    }
+
+    /// Học bảng "Danh mục trưởng bộ phận": tên cơ sở → nhóm chat và người chịu trách nhiệm.
+    /// Bảng này là nguồn đúng nhất vì nó có cả cột chat_id lẫn tài khoản cửa hàng trưởng,
+    /// nên cơ sở mới thêm (như 25 Xuân La) cũng gửi ảnh được mà không phải sửa data/.
     async fn learn_cht(&self) {
         {
             let at = self.dir_at.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(t) = *at { if t.elapsed() < Duration::from_secs(3600) { return; } }
         }
         let v = self.run(vec!["base".into(), "+record-list".into(), "--base-token".into(), self.base_token.clone(),
-            "--table-id".into(), self.table_id.clone(), "--page-size".into(), "500".into(), "--format".into(), "json".into()],
+            "--table-id".into(), self.dir_table.clone(), "--limit".into(), "200".into(), "--format".into(), "json".into()],
             Duration::from_secs(90)).await;
         if let Ok(v) = v {
             if let (Some(ids), Some(rows)) = (
-                v.pointer("/data/field_id_list").and_then(|x| x.as_array()),
+                // cột theo tên field; "fields" là danh sách tên, "field_id_list" là id
+                v.pointer("/data/fields").and_then(|x| x.as_array())
+                    .or_else(|| v.pointer("/data/field_id_list").and_then(|x| x.as_array())),
                 v.pointer("/data/data").and_then(|x| x.as_array()),
             ) {
                 let names: Vec<String> = ids.iter().filter_map(|x| x.as_str()).map(String::from).collect();
-                let i_store = names.iter().position(|n| n == "fldj3xt3dD");
-                let i_owner = names.iter().position(|n| n == "fldUt5zN5k");
-                if let (Some(si), Some(oi)) = (i_store, i_owner) {
-                    let mut map = HashMap::new();
-                    for row in rows {
-                        let chat = row.get(si).and_then(|c| c.as_array()).and_then(|a| a.first())
-                            .and_then(|o| o.get("id")).and_then(|x| x.as_str());
-                        let owner = row.get(oi).and_then(|c| c.as_array()).and_then(|a| a.first())
-                            .and_then(|o| o.get("id")).and_then(|x| x.as_str());
-                        if let (Some(c), Some(o)) = (chat, owner) { map.entry(c.to_string()).or_insert(o.to_string()); }
+                let col = |n: &str| names.iter().position(|x| x == n);
+                let (i_name, i_chat, i_owner) =
+                    (col("Tên cơ sở"), col("chat_id"), col("Account đã được cấp quyền xử lý"));
+                let mut by_name = HashMap::new();
+                let mut owner_by_name = HashMap::new();
+                let mut owner_by_chat = HashMap::new();
+                for row in rows {
+                    let name = i_name.and_then(|i| row.get(i)).and_then(|x| x.as_str()).unwrap_or("");
+                    if name.is_empty() || name == "null" { continue; }
+                    let chat = i_chat.and_then(|i| row.get(i)).and_then(|x| x.as_str()).unwrap_or("");
+                    if chat.is_empty() { continue; }
+                    by_name.insert(norm(name), chat.to_string());
+                    by_name.insert(loose(name), chat.to_string());
+                    // ưu tiên tài khoản có chữ "CHT" (cửa hàng trưởng), bỏ qua GSMB/GSMN/HCNS.
+                    // Cơ sở chưa khai cửa hàng trưởng thì lấy tài khoản đầu tiên được cấp
+                    // quyền xử lý, để ảnh gửi lên vẫn có người chịu trách nhiệm.
+                    let accounts: Vec<(&str, bool)> = i_owner.and_then(|i| row.get(i)).and_then(|x| x.as_array())
+                        .map(|acc| acc.iter().filter_map(|a| {
+                            let id = a.get("id").and_then(|x| x.as_str())?;
+                            let who = a.get("name").and_then(|x| x.as_str()).unwrap_or("").to_uppercase();
+                            let is_cht = who.split(|c: char| !c.is_alphanumeric()).any(|w| w == "CHT");
+                            Some((id, is_cht))
+                        }).collect()).unwrap_or_default();
+                    let owner = accounts.iter().find(|(_, cht)| *cht).or_else(|| accounts.first());
+                    if let Some((o, is_cht)) = owner {
+                        owner_by_chat.entry(chat.to_string()).or_insert(o.to_string());
+                        if *is_cht {
+                            owner_by_name.insert(norm(name), o.to_string());
+                            owner_by_name.insert(loose(name), o.to_string());
+                        }
                     }
-                    if let Ok(mut m) = self.cht_by_chat.lock() { *m = map; }
-                    println!("[lark] học được {} cặp cơ sở→người chịu trách nhiệm", self.cht_by_chat.lock().unwrap_or_else(|e| e.into_inner()).len());
                 }
+                let (n_chat, n_cht) = (by_name.len(), owner_by_name.len());
+                if let Ok(mut m) = self.chat_by_name.lock() { *m = by_name; }
+                if let Ok(mut m) = self.cht_by_name.lock() { *m = owner_by_name; }
+                if let Ok(mut m) = self.cht_by_chat.lock() { *m = owner_by_chat; }
+                println!("[lark] danh mục {} — {} tên cơ sở có nhóm chat, {} có cửa hàng trưởng", self.dir_table, n_chat / 2, n_cht / 2);
             }
         }
         if let Ok(mut at) = self.dir_at.lock() { *at = Some(Instant::now()); }
@@ -334,7 +427,13 @@ impl Lark {
         let mut fields = serde_json::Map::new();
         fields.insert("TUẦN".into(), json!([format!("Tuần {week}")]));
         fields.insert("THỜI GIAN GHI NHẬN".into(), json!(iso_local(now)));
-        if let Some(chat) = self.chat_of(&store.name) { fields.insert("CƠ SỞ".into(), json!([{ "id": chat }])); }
+        // nạp danh mục trưởng bộ phận trước để cơ sở mới (chưa có trong data/) vẫn tìm được nhóm chat
+        self.learn_cht().await;
+        match self.chat_of(&store.id, &store.name) {
+            Some(chat) => { fields.insert("CƠ SỞ".into(), json!([{ "id": chat }])); }
+            // thiếu nhóm chat thì bỏ trống cột CƠ SỞ chứ không chặn ảnh — nhưng ghi log để bổ sung
+            None => println!("[capture] chưa có nhóm chat cho {} · {}", store.id, store.name),
+        }
         // chỉ tự gắn cửa hàng trưởng khi danh mục là lỗi 5S hoặc 4C
         let cat = v.get("category").and_then(|x| x.as_str()).unwrap_or("").trim().to_uppercase();
         let is_5s_or_4c = cat.contains("5S") || cat == "4C";
@@ -345,7 +444,7 @@ impl Lark {
         }
         let mut cht_hit = None;
         if is_5s_or_4c {
-            if let Some(cht) = self.cht_of(&store.name).await {
+            if let Some(cht) = self.cht_of(&store.id, &store.name).await {
                 cht_hit = Some(cht.clone());
                 fields.insert("NGƯỜI CHỊU TRÁCH NHIỆM".into(), json!([{ "id": cht }]));
             }

@@ -197,6 +197,22 @@ async fn main() {
     let app = Arc::new(App { root, data, public, ffmpeg, stores, by_id, users, secret, hls, snap, zones, lark, zones_path, codes: Default::default(), login_attempts: Default::default(), overrides: Default::default(), cam_health: Default::default() });
 
     spawn_health(app.clone());
+    {
+        // Nạp sẵn danh mục trưởng bộ phận rồi kiểm tra xem cơ sở nào chưa gửi ảnh được,
+        // để log lúc khởi động đã thấy ngay thay vì phải chờ người dùng bấm chụp.
+        let app = app.clone();
+        tokio::spawn(async move {
+            app.lark.warm().await;
+            if !app.lark.enabled { return; }
+            let (mut ok, mut miss) = (0, Vec::new());
+            for s in app.stores.iter() {
+                if app.lark.chat_of(&s.id, &s.name).is_some() { ok += 1; }
+                else { miss.push(format!("{} · {}", s.id, s.name)); }
+            }
+            println!("[lark] nhóm chat: {ok}/{} cơ sở", app.stores.len());
+            if !miss.is_empty() { println!("[lark] chưa có nhóm chat: {}", miss.join(" | ")); }
+        });
+    }
     spawn_thermal(app.clone());
     spawn_reaper(app.clone());
     let router = Router::new()

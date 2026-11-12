@@ -18,3 +18,6 @@ dist/
 
 # ---- node_modules cũ ----
 node_modules/
+
+# ---- cấu hình docker tạm trong dự án ----
+.docker/

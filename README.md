@@ -198,22 +198,29 @@ Việc ghi lên Lark dùng `bin/lark-cli` với tài khoản người dùng, nê
 bin/lark-cli auth login --scope "bitable:app base:record:create base:field:read drive:drive"
 ```
 
-Cấp xong, mỗi lần bấm 📷 là một dòng mới xuất hiện trong bảng *Giám sát tháng* (kèm ảnh,
-tuần tự chọn theo ngày chụp, và **CƠ SỞ** gán theo nhóm chat của cửa hàng trong `data/dm.ndjson`).
+Cấp xong, mỗi lần bấm 📷 là một dòng mới xuất hiện trong bảng *Giám sát tháng* (kèm ảnh và
+tuần tự chọn theo ngày chụp). Trường **CƠ SỞ** gán theo nhóm chat của cửa hàng — lấy từ bảng
+*Danh mục trưởng bộ phận* (`tbl0QTtu2Ne6UUa9`). Nếu chọn danh mục **5S** hoặc **4C** thì
+**NGƯỜI CHỊU TRÁCH NHIỆM** được điền sẵn cửa hàng trưởng của cơ sở đó.
 
 Sau khi tạo dòng, web **mở thẳng tab (view) của đúng cửa hàng** để gõ danh mục lỗi/mô tả ngay trên bảng
-(không mở hộp chi tiết bản ghi). Bản đồ cơ sở → tab nằm ở `data/lark-views.json`;
-thêm/đổi tab bên Lark thì chạy lại:
+(không mở hộp chi tiết bản ghi). Bản đồ cơ sở → tab và cơ sở → nhóm chat nằm ở
+`data/lark-views.json` và `data/lark-chats.json`; thêm/đổi cơ sở, tab hay cửa hàng trưởng bên Lark
+thì chạy lại:
 
 ```bash
-node tools/lark-views.js     # 35/37 cơ sở khớp tab; còn lại rơi về tab "Tổng hợp"
+node tools/lark-sync.js
+# data/lark-views.json — 36/38 cơ sở có tab riêng   (Lily Home, Kho tổng HCM dùng tab "Tổng hợp")
+# data/lark-chats.json — 38/38 cơ sở có nhóm chat, 35 có người chịu trách nhiệm
 ```
+
+Script gọi `lark-cli` trong container đang chạy (`docker exec lilycam /app/bin/lark-cli`), nên
+không cần đăng nhập lại trên máy. Server cũng tự đọc bảng danh mục lúc khởi động và mỗi lần chụp,
+nên tệp ánh xạ chỉ để chốt sẵn và xem báo cáo cơ sở nào còn thiếu.
 
 Muốn mở chi tiết bản ghi thay vì bảng thì đặt `"open": "record"` trong `data/lark.json`.
 
-Vài cơ sở chưa có nhóm chat trong bảng danh mục (`Lily Home`, `116A`, `Kho tổng HCM`, …) nên trường
-**CƠ SỞ** của dòng mới sẽ để trống — chọn tay trong Lark. Ảnh vẫn được lưu ở `data/captures/`
-nên không mất dữ liệu kể cả khi Lark lỗi.
+Ảnh luôn được lưu ở `data/captures/` nên không mất dữ liệu kể cả khi Lark lỗi.
 
 ---
 

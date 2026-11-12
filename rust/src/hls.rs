@@ -9,9 +9,38 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-const IDLE: Duration = Duration::from_secs(180);
+/// Không ai xem quá bao lâu thì tắt phiên (giây). Mặc định 90.
+fn idle_secs() -> u64 {
+    std::env::var("IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(90)
+}
+fn idle() -> Duration { Duration::from_secs(idle_secs()) }
 
 struct Profile { width: u32, fps: u32, rate: u32, crf: u32, threads: u32 }
+
+/// Thiết bị VAAPI để giải mã + mã hoá bằng GPU Intel. `VAAPI=0` để tắt hẳn.
+fn vaapi_device() -> Option<PathBuf> {
+    let off = std::env::var("VAAPI").map(|v| v == "0" || v.eq_ignore_ascii_case("off")).unwrap_or(false);
+    if off { return None; }
+    let p = std::env::var("VAAPI_DEV").map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/dev/dri/renderD128"));
+    if p.exists() { Some(p) } else { None }
+}
+
+/// Máy không có GPU/driver phù hợp thì ffmpeg không mở được thiết bị → dùng libx264.
+fn vaapi_works(ffmpeg: &std::path::Path, dev: &std::path::Path) -> bool {
+    let args: Vec<String> = vec![
+        "-hide_banner".into(), "-loglevel".into(), "error".into(),
+        "-init_hw_device".into(), format!("vaapi=va:{}", dev.display()),
+        "-f".into(), "lavfi".into(), "-i".into(), "nullsrc=s=320x240:d=0.2".into(),
+        "-vf".into(), "format=nv12,hwupload".into(),
+        "-c:v".into(), "h264_vaapi".into(), "-f".into(), "null".into(), "-".into(),
+    ];
+    match std::process::Command::new(ffmpeg).args(&args)
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() {
+        Ok(s) => s.success(),
+        Err(_) => false,
+    }
+}
 
 fn profile_of(name: &str) -> Option<Profile> {
     Some(match name {
@@ -41,6 +70,8 @@ pub struct Hls {
     sessions: Mutex<HashMap<String, Session>>,
     pb: Mutex<HashMap<String, crate::netsdk::PbSession>>,
     enabled: bool,
+    /// Có GPU Intel dùng được VAAPI thì giải mã + mã hoá bằng GPU, không thì libx264.
+    vaapi: Option<PathBuf>,
 }
 
 impl Hls {
@@ -65,7 +96,22 @@ impl Hls {
         let enabled = ffmpeg.exists();
         let max = std::env::var("MAX_STREAMS").ok().and_then(|v| v.parse().ok()).unwrap_or(20usize);
         println!("  Giới hạn phiên: {max}");
-        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled }
+        // GPU: thử một lần lúc khởi động (encode 0,2 s) rồi quyết định dùng cả phiên chạy.
+        let vaapi = match vaapi_device() {
+            Some(dev) if enabled && vaapi_works(&ffmpeg, &dev) => {
+                println!("  Giải mã/mã hoá: VAAPI ({})", dev.display());
+                Some(dev)
+            }
+            Some(_) => {
+                println!("  Giải mã/mã hoá: libx264 (VAAPI không khởi tạo được)");
+                None
+            }
+            None => {
+                println!("  Giải mã/mã hoá: libx264 (không có GPU hoặc VAAPI=0)");
+                None
+            }
+        };
+        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi }
     }
 
     /// Phát lại bản ghi qua NetSDK (hồ sơ pbNNN).
@@ -85,7 +131,7 @@ impl Hls {
             }
             None => {
                 let dir = self.base.join(format!("{}-{}", key, crate::auth::now_ms()));
-                let sess = crate::netsdk::start(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, start, &dir).await?;
+                let sess = crate::netsdk::start(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, start, &dir, self.vaapi.as_deref()).await?;
                 println!("[netsdk] mở {key}");
                 self.pb.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), sess);
                 dir
@@ -105,7 +151,8 @@ impl Hls {
     pub fn stats(&self) -> Value {
         let m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let by: Vec<String> = m.values().map(|s| s.profile.clone()).collect();
-        json!({ "sessions": m.len(), "max": self.max, "idleSec": 180, "byProfile": by, "list": [] })
+        json!({ "sessions": m.len(), "max": self.max, "idleSec": idle_secs(),
+                "codec": if self.vaapi.is_some() { "vaapi" } else { "libx264" }, "byProfile": by, "list": [] })
     }
 
     /// Trả nội dung file trong phiên (tự mở phiên nếu chưa có, chờ tới khi có segment đầu).
@@ -147,15 +194,28 @@ impl Hls {
         let _ = std::fs::create_dir_all(&dir);
         let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0",
             store.user, store.pass, store.host, store.rtsp_port, ch);
-        let mut args: Vec<String> = vec!["-hide_banner".into(), "-loglevel".into(), "error".into(),
-            "-rtsp_transport".into(), "tcp".into(), "-timeout".into(), "8000000".into(),
-            "-flags".into(), "low_delay".into(), "-i".into(), url];
-        args.extend(["-c:v".into(), "libx264".into(), "-preset".into(), "veryfast".into(),
-            "-threads".into(), p.threads.to_string(), "-crf".into(), p.crf.to_string(),
-            "-maxrate".into(), format!("{}k", p.rate), "-bufsize".into(), format!("{}k", p.rate * 2),
-            "-profile:v".into(), "main".into(), "-bf".into(), "2".into(),
-            "-x264-params".into(), "aq-mode=2".into(),
-            "-pix_fmt".into(), "yuv420p".into()]);
+        let mut args: Vec<String> = vec!["-hide_banner".into(), "-loglevel".into(), "error".into()];
+        if let Some(dev) = &self.vaapi {
+            // giải mã ngay trên GPU: khung hình không phải copy về RAM rồi encode lại
+            args.extend(["-hwaccel".into(), "vaapi".into(),
+                "-hwaccel_device".into(), dev.display().to_string(),
+                "-hwaccel_output_format".into(), "vaapi".into()]);
+        }
+        args.extend(["-rtsp_transport".into(), "tcp".into(), "-timeout".into(), "8000000".into(),
+            "-flags".into(), "low_delay".into(), "-i".into(), url]);
+        if self.vaapi.is_some() {
+            args.extend(["-c:v".into(), "h264_vaapi".into(),
+                "-b:v".into(), format!("{}k", p.rate), "-maxrate".into(), format!("{}k", p.rate),
+                "-bufsize".into(), format!("{}k", p.rate * 2),
+                "-profile:v".into(), "main".into()]);
+        } else {
+            args.extend(["-c:v".into(), "libx264".into(), "-preset".into(), "veryfast".into(),
+                "-threads".into(), p.threads.to_string(), "-crf".into(), p.crf.to_string(),
+                "-maxrate".into(), format!("{}k", p.rate), "-bufsize".into(), format!("{}k", p.rate * 2),
+                "-profile:v".into(), "main".into(), "-bf".into(), "2".into(),
+                "-x264-params".into(), "aq-mode=2".into(),
+                "-pix_fmt".into(), "yuv420p".into()]);
+        }
         if profile == "hd" {
             // luồng xem 1 camera: kèm âm thanh nếu đầu ghi có (AAC, mono)
             args.extend(["-map".into(), "0:v:0".into(), "-map".into(), "0:a:0?".into(),
@@ -166,7 +226,12 @@ impl Hls {
         } else {
             args.push("-an".into());
         }
-        if p.width > 0 {
+        if self.vaapi.is_some() {
+            // scale_vaapi giữ khung hình trong VRAM; hd giữ nguyên độ phân giải gốc
+            if p.width > 0 && p.fps > 0 {
+                args.extend(["-vf".into(), format!("fps={},scale_vaapi=w={}:h=-2", p.fps, p.width)]);
+            }
+        } else if p.width > 0 {
             args.extend(["-vf".into(), format!("scale={}:-2:flags=lanczos,fps={}", p.width, p.fps)]);
         }
         // (C) lưới dày dùng keyframe 1 giây: ít CPU/bitrate hơn
@@ -228,10 +293,50 @@ impl Hls {
         println!("[hls] đã đóng toàn bộ phiên");
     }
 
-    /// Đóng các phiên không ai xem quá 3 phút.
+    /// Giữ tối đa `keep` phiên, đóng phiên lâu không xem nhất (dùng khi CPU quá nhiệt).
+    pub fn trim_to(&self, keep: usize) {
+        let mut killed = 0usize;
+        {
+            let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            while m.len() > keep {
+                let victim = m.iter().max_by_key(|(_, s)| s.last.elapsed()).map(|(k, _)| k.clone());
+                match victim.and_then(|k| m.remove(&k)) {
+                    Some(mut old) => {
+                        let _ = old.child.start_kill();
+                        let _ = std::fs::remove_dir_all(&old.dir);
+                        killed += 1;
+                    }
+                    None => break,
+                }
+            }
+        }
+        {
+            let mut pb = self.pb.lock().unwrap_or_else(|e| e.into_inner());
+            while pb.len() > 1 {
+                let victim = pb.iter().max_by_key(|(_, s)| s.last.elapsed()).map(|(k, _)| k.clone());
+                match victim.and_then(|k| pb.remove(&k)) {
+                    Some(mut old) => {
+                        let _ = old.helper.start_kill();
+                        let _ = old.ff.start_kill();
+                        let _ = std::fs::remove_dir_all(&old.dir);
+                        killed += 1;
+                    }
+                    None => break,
+                }
+            }
+        }
+        if killed > 0 { println!("[hls] giảm tải: đóng {killed} phiên (còn {keep})"); }
+    }
+
+    /// Số phiên đang chạy.
+    pub fn count(&self) -> usize {
+        self.sessions.lock().map(|m| m.len()).unwrap_or(0)
+    }
+
+    /// Đóng các phiên không ai xem quá thời gian chờ.
     pub fn sweep(&self) {
         if let Ok(mut pb) = self.pb.lock() {
-            let dead: Vec<String> = pb.iter().filter(|(_, s)| s.last.elapsed() > IDLE).map(|(k, _)| k.clone()).collect();
+            let dead: Vec<String> = pb.iter().filter(|(_, s)| s.last.elapsed() > idle()).map(|(k, _)| k.clone()).collect();
             for k in dead {
                 if let Some(mut s) = pb.remove(&k) {
                     let _ = std::fs::remove_dir_all(&s.dir);
@@ -242,7 +347,7 @@ impl Hls {
             }
         }
         let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        let dead: Vec<String> = m.iter().filter(|(_, s)| s.last.elapsed() > IDLE).map(|(k, _)| k.clone()).collect();
+        let dead: Vec<String> = m.iter().filter(|(_, s)| s.last.elapsed() > idle()).map(|(k, _)| k.clone()).collect();
         for k in dead {
             if let Some(mut s) = m.remove(&k) {
                 let _ = s.child.start_kill();
@@ -283,7 +388,6 @@ impl Hls {
     /// Tạo clip tải về (đường dẫn MP4 trong thư mục tạm của tiến trình).
     pub async fn clip(&self, store: &crate::Store, ch: u32, from: i64, dur: i64) -> Option<std::path::PathBuf> {
         let dir = self.base.join(format!("clip-{}", crate::auth::now_ms()));
-        let r = crate::netsdk::clip(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, from, dur, &dir).await;
-        r
+        crate::netsdk::clip(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, from, dur, &dir, self.vaapi.as_deref()).await
     }
 }

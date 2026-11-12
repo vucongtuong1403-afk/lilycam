@@ -6,10 +6,12 @@ RUN mkdir src && echo 'fn main(){}' > src/main.rs && cargo build --release && rm
 COPY rust/src ./src
 RUN touch src/main.rs && cargo build --release
 
-FROM debian:bookworm-slim
+# Runtime Debian trixie: libva 2.22 mới có symbol vaMapBuffer2 mà ffmpeg BtbN
+# cần cho VAAPI (bookworm/libva 2.17 thiếu symbol này → không bật được GPU).
+FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata libstdc++6 curl \
-      libdrm2 libva2 libva-drm2 intel-media-va-driver i965-va-driver \
+      libdrm2 libva2 libva-drm2 intel-media-va-driver \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV TZ=Asia/Ho_Chi_Minh PORT=8790

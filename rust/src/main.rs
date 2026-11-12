@@ -37,6 +37,8 @@ pub struct Store {
     pub allowed_users: Option<Vec<String>>,
     /// Cổng RTSP (mặc định 554; một số đầu ghi dùng 3776/10554…).
     pub rtsp_port: u16,
+    /// Cổng NetSDK dùng cho xem lại/cắt clip (mặc định 37777, KHÔNG phải cổng web).
+    pub sdk_port: u16,
 }
 
 pub struct App {
@@ -102,6 +104,7 @@ fn load_stores(path: &std::path::Path) -> Vec<Store> {
                     .map(|a| a.iter().filter_map(|n| n.as_u64()).map(|n| n as u32).collect()),
                 allowed_users: None,
                 rtsp_port: s.get("rtspPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(554),
+                sdk_port: s.get("sdkPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(37777),
             })
         }).collect()
     }).unwrap_or_default()
@@ -194,6 +197,8 @@ async fn main() {
     let app = Arc::new(App { root, data, public, ffmpeg, stores, by_id, users, secret, hls, snap, zones, lark, zones_path, codes: Default::default(), login_attempts: Default::default(), overrides: Default::default(), cam_health: Default::default() });
 
     spawn_health(app.clone());
+    spawn_thermal(app.clone());
+    spawn_reaper(app.clone());
     let router = Router::new()
         .route("/api/health", get(api_health))
         .route("/api/login", post(api_login))
@@ -845,7 +850,8 @@ async fn api_store_new(State(app): State<Arc<App>>, headers: HeaderMap, body: St
     let probe_store = Store { id: id.clone(), name: name.clone(), unit: unit.clone(), host: host.clone(),
         port, user: user.clone(), pass: pass.clone(), cameras: channels.len() as u32,
         plan: None, verified: true, note: None, channels: Some(channels.clone()), allowed_users: None,
-        rtsp_port: v.get("rtspPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(554) };
+        rtsp_port: v.get("rtspPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(554),
+        sdk_port: v.get("sdkPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(37777) };
     let mut live: Vec<u32> = Vec::new();
     for ch in channels.iter() {
         if probe_rtsp(&app.ffmpeg, &probe_store, *ch).await { live.push(*ch); }
@@ -879,3 +885,81 @@ async fn api_store_new(State(app): State<Arc<App>>, headers: HeaderMap, body: St
     json_res(StatusCode::OK, json!({ "ok": true, "id": id, "channels": live, "restarting": true }))
 }
 
+
+/// Đọc nhiệt độ CPU (millidegree → °C). None nếu máy không có cảm biến.
+fn cpu_temp() -> Option<f32> {
+    let mut best: Option<f32> = None;
+    if let Ok(rd) = std::fs::read_dir("/sys/class/hwmon") {
+        for e in rd.flatten() {
+            let dir = e.path();
+            let name = std::fs::read_to_string(dir.join("name")).unwrap_or_default();
+            let n = name.trim().to_lowercase();
+            // ưu tiên cảm biến package/core của CPU
+            if !(n.contains("coretemp") || n.contains("k10temp") || n.contains("zenpower") || n.contains("cpu")) {
+                continue;
+            }
+            if let Ok(rd2) = std::fs::read_dir(&dir) {
+                for f in rd2.flatten() {
+                    let p = f.path();
+                    let fname = p.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+                    if fname.starts_with("temp") && fname.ends_with("_input") {
+                        if let Ok(t) = std::fs::read_to_string(&p) {
+                            if let Ok(v) = t.trim().parse::<f32>() {
+                                let c = v / 1000.0;
+                                best = Some(best.map_or(c, |b: f32| b.max(c)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if best.is_none() {
+        for i in 0..8 {
+            let p = format!("/sys/class/thermal/thermal_zone{i}/temp");
+            if let Ok(t) = std::fs::read_to_string(&p) {
+                if let Ok(v) = t.trim().parse::<f32>() {
+                    let c = v / 1000.0;
+                    if c > 20.0 { best = Some(best.map_or(c, |b: f32| b.max(c))); }
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Canh nhiệt: CPU nóng quá thì đóng bớt phiên camera (không ai xem thì không encode).
+fn spawn_thermal(app: Arc<App>) {
+    let hot = std::env::var("TEMP_HOT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(80.0);
+    let cool = std::env::var("TEMP_COOL").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(65.0);
+    tokio::spawn(async move {
+        let mut level = 0usize;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            let t = match cpu_temp() { Some(t) => t, None => continue };
+            let n = app.hls.count();
+            if t >= hot && n > 2 {
+                // nóng: giữ 2 phiên gần nhất được xem
+                app.hls.trim_to(2);
+                level = 1;
+                println!("[thermal] {t:.0}°C ≥ {hot:.0}°C → giảm còn 2 phiên");
+            } else if t >= hot && level == 0 {
+                level = 1;
+                println!("[thermal] {t:.0}°C cao nhưng chỉ {n} phiên");
+            } else if t <= cool && level > 0 {
+                level = 0;
+                println!("[thermal] hạ nhiệt {t:.0}°C");
+            }
+        }
+    });
+}
+
+/// Dọn phiên định kỳ — không phụ thuộc việc có người gọi API.
+fn spawn_reaper(app: Arc<App>) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            app.hls.sweep();
+        }
+    });
+}

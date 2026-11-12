@@ -305,9 +305,39 @@ Không cần cài Node.js, ffmpeg hay SDK lên máy.
 
 ```bash
 python3 tools/bench.py --port 8790 --hd 8 --token "$TOKEN"   # đo DNS/TCP/snapshot/HD
-curl -s -H "Cookie: lilycam_sid=$TOKEN" localhost:8790/api/stats   # phiên đang chạy, RAM
+curl -s -H "Cookie: lilycam_sid=$TOKEN" localhost:8790/api/stats   # phiên đang chạy, RAM, codec
 docker compose restart lilycam                                # khởi động lại container
 ```
+
+### Giải mã / mã hoá bằng GPU (VAAPI)
+
+Mỗi phiên xem là một ffmpeg đọc RTSP rồi xuất HLS. Nếu máy có GPU Intel và
+`/dev/dri/renderD128` được truyền vào container (mục `devices` + `group_add` trong
+`docker-compose.yml`), LilyCam giải mã **và** mã hoá ngay trên GPU:
+
+```
+-hwaccel vaapi -hwaccel_output_format vaapi … -vf fps=15,scale_vaapi=w=640:h=-2 -c:v h264_vaapi
+```
+
+Lúc khởi động chương trình tự thử encode 0,2 giây rồi in ra một trong hai dòng:
+
+```
+  Giải mã/mã hoá: VAAPI (/dev/dri/renderD128)
+  Giải mã/mã hoá: libx264 (không có GPU hoặc VAAPI=0)
+```
+
+Không có GPU thì tự động quay về libx264, không cần sửa gì. Tắt tay bằng `VAAPI: "0"`
+trong `docker-compose.yml`, hoặc đổi thiết bị bằng `VAAPI_DEV`.
+
+Đo trên i5-14400, 12 phiên lưới `g6`:
+
+| | CPU | Nhiệt độ CPU |
+|---|---|---|
+| libx264 | ~120–460 % | 80–92 °C |
+| VAAPI | **23–45 %** | **38–56 °C** |
+
+Hình ảnh và âm thanh không đổi (vẫn H.264 Main, cùng bitrate); xem lại bản ghi và
+cắt clip cũng dùng GPU.
 
 Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) · dữ liệu thô: `docs/bench.json`.
 
@@ -318,7 +348,8 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | Ô camera “Không có tín hiệu”, banner đỏ | Đầu ghi mất mạng, DDNS sai, cổng forward đóng. Bấm **Thử lại** hoặc sửa bằng nút bút chì |
 | HD cứ tự về “Nhẹ” | Đầu ghi không mở RTSP 554, mạng yếu, hoặc trình duyệt không có H.264 (Chromium thuần). Dùng Chrome/Edge/Safari |
 | Lần đầu mở HD chậm 4–6 giây | ffmpeg phải dò codec + chờ keyframe; các lần sau nhanh hơn |
-| Máy nóng / CPU cao | Giảm `MAX_STREAMS`, chọn lưới ít ô hơn, hoặc dùng chế độ Nhẹ |
+| Máy nóng / CPU cao | Bật VAAPI (xem mục 8) — giảm ~10 lần CPU. Không có GPU thì giảm `MAX_STREAMS` hoặc chọn lưới ít ô |
+| Nhiệt vẫn cao dù VAAPI | Log có `[thermal] …°C ≥ 80°C → giảm còn 2 phiên` — watchdog tự đóng bớt phiên; hạ `TEMP_HOT` nếu muốn ngưỡng thấp hơn |
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |
 | Quên mật khẩu | `docker compose exec lilycam ./lilycam --reset-password` |

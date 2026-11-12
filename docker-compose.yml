@@ -10,8 +10,16 @@ services:
       TZ: Asia/Ho_Chi_Minh
       PORT: "8790"
       # trần phiên: quá 12 thì đuổi phiên lâu nhất, tránh 10 ô + HD làm CPU vọt
-      # (bản Rust chỉ đọc MAX_STREAMS; thời gian ngủ 180 s nằm trong code)
       MAX_STREAMS: "12"
+      # không ai xem quá 90 s thì tắt ffmpeg của kênh đó (trước đây 180 s và chỉ
+      # được dọn khi có request nên phiên treo hàng chục phút → CPU 90°C)
+      IDLE_SECS: "90"
+      # watchdog nhiệt: ≥ 80°C thì giữ tối đa 2 phiên, hạ dưới 65°C thì thôi
+      TEMP_HOT: "80"
+      TEMP_COOL: "65"
+      # giải mã + mã hoá bằng GPU Intel (VAAPI). Đặt "0" nếu máy không có GPU
+      VAAPI: "1"
+      VAAPI_DEV: /dev/dri/renderD128
     devices:
       - /dev/dri:/dev/dri
     group_add:

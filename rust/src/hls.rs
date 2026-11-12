@@ -145,8 +145,8 @@ impl Hls {
         }
         let dir = self.base.join(format!("{}-{}", key, crate::auth::now_ms()));
         let _ = std::fs::create_dir_all(&dir);
-        let url = format!("rtsp://{}:{}@{}:554/cam/realmonitor?channel={}&subtype=0",
-            store.user, store.pass, store.host, ch);
+        let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0",
+            store.user, store.pass, store.host, store.rtsp_port, ch);
         let mut args: Vec<String> = vec!["-hide_banner".into(), "-loglevel".into(), "error".into(),
             "-rtsp_transport".into(), "tcp".into(), "-timeout".into(), "8000000".into(),
             "-flags".into(), "low_delay".into(), "-i".into(), url];
@@ -264,8 +264,8 @@ pub async fn rtsp_playback_supported(ffmpeg: &std::path::Path, store: &crate::St
         let dt = crate::lark::Dt::from_secs(secs);
         format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", dt.y, dt.m, dt.d, dt.hh, dt.mm, dt.ss)
     };
-    let url = format!("rtsp://{}:{}@{}:554/cam/playback?channel=1&subtype=0&starttime={}&endtime={}",
-        store.user, store.pass, store.host, fmt(start), fmt(start + 300));
+    let url = format!("rtsp://{}:{}@{}:{}/cam/playback?channel=1&subtype=0&starttime={}&endtime={}",
+        store.user, store.pass, store.host, store.rtsp_port, fmt(start), fmt(start + 300));
     let mut cmd = tokio::process::Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "5000000",
         "-i", &url, "-t", "0", "-f", "null", "-"])

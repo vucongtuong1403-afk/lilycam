@@ -35,6 +35,8 @@ pub struct Store {
     pub note: Option<String>,
     pub channels: Option<Vec<u32>>,
     pub allowed_users: Option<Vec<String>>,
+    /// Cổng RTSP (mặc định 554; một số đầu ghi dùng 3776/10554…).
+    pub rtsp_port: u16,
 }
 
 pub struct App {
@@ -99,6 +101,7 @@ fn load_stores(path: &std::path::Path) -> Vec<Store> {
                 channels: s.get("activeChannels").and_then(|x| x.as_array())
                     .map(|a| a.iter().filter_map(|n| n.as_u64()).map(|n| n as u32).collect()),
                 allowed_users: None,
+                rtsp_port: s.get("rtspPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(554),
             })
         }).collect()
     }).unwrap_or_default()
@@ -714,7 +717,7 @@ async fn api_clip(State(app): State<Arc<App>>, headers: HeaderMap, Query(q): Que
 
 /// Mở thử 1 kênh RTSP, lấy 1 khung hình → coi như kênh "sống".
 async fn probe_rtsp(ffmpeg: &std::path::Path, s: &Store, ch: u32) -> bool {
-    let url = format!("rtsp://{}:{}@{}:554/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, ch);
+    let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, s.rtsp_port, ch);
     let mut cmd = tokio::process::Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "6000000",
             "-i", &url, "-frames:v", "1", "-f", "null", "-"])
@@ -841,7 +844,8 @@ async fn api_store_new(State(app): State<Arc<App>>, headers: HeaderMap, body: St
 
     let probe_store = Store { id: id.clone(), name: name.clone(), unit: unit.clone(), host: host.clone(),
         port, user: user.clone(), pass: pass.clone(), cameras: channels.len() as u32,
-        plan: None, verified: true, note: None, channels: Some(channels.clone()), allowed_users: None };
+        plan: None, verified: true, note: None, channels: Some(channels.clone()), allowed_users: None,
+        rtsp_port: v.get("rtspPort").and_then(|x| x.as_u64()).map(|n| n as u16).unwrap_or(554) };
     let mut live: Vec<u32> = Vec::new();
     for ch in channels.iter() {
         if probe_rtsp(&app.ffmpeg, &probe_store, *ch).await { live.push(*ch); }

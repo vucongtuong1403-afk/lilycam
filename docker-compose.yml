@@ -11,7 +11,7 @@ services:
       TZ: Asia/Ho_Chi_Minh
       PORT: "8790"
       # trần phiên: quá 12 thì đuổi phiên lâu nhất, tránh 10 ô + HD làm CPU vọt
-      MAX_STREAMS: "12"
+      MAX_STREAMS: "18"
       # không ai xem quá 90 s thì tắt ffmpeg của kênh đó (trước đây 180 s và chỉ
       # được dọn khi có request nên phiên treo hàng chục phút → CPU 90°C)
       IDLE_SECS: "90"

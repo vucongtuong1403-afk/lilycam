@@ -463,9 +463,13 @@ impl Lark {
             "--table-id".into(), self.table_id.clone(), "--json".into(), format!("@{}", tmp.display()), "--as".into(), "user".into()],
             Duration::from_secs(90)).await;
         let _ = std::fs::remove_file(&tmp);
+        if let Err(e) = &res { println!("[capture] lark-cli lỗi: {e}"); }
         let record_id = res.as_ref().ok()
             .and_then(|v| v.get("data")).and_then(|d| d.get("record_id_list")).and_then(|l| l.as_array())
             .and_then(|l| l.first()).and_then(|x| x.as_str()).map(String::from);
+        if record_id.is_none() {
+            println!("[capture] không tạo được record: {}", res.as_ref().map(|v| v.to_string()).unwrap_or_default());
+        }
         let record_id = match record_id {
             Some(r) => r,
             None => return json!({ "ok": true, "saved": format!("{day}/{name}"), "week": week, "recordId": null,

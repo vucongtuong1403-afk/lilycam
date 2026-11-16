@@ -10,6 +10,9 @@ services:
     environment:
       TZ: Asia/Ho_Chi_Minh
       PORT: "8790"
+      # container chạy uid 1000 nên KHÔNG đọc được /root; đặt HOME=/app để
+      # lark-cli tìm thấy cấu hình ở /app/.lark-cli + /app/.local/share/lark-cli
+      HOME: /app
       # trần phiên: quá 12 thì đuổi phiên lâu nhất, tránh 10 ô + HD làm CPU vọt
       MAX_STREAMS: "18"
       # không ai xem quá 90 s thì tắt ffmpeg của kênh đó (trước đây 180 s và chỉ
@@ -28,5 +31,5 @@ services:
     volumes:
       - ./data:/app/data
       - ./public:/app/public   # sửa giao diện không cần build lại image
-      - ${HOME}/.lark-cli:/root/.lark-cli
-      - ${HOME}/.local/share/lark-cli:/root/.local/share/lark-cli
+      - ${HOME}/.lark-cli:/app/.lark-cli
+      - ${HOME}/.local/share/lark-cli:/app/.local/share/lark-cli

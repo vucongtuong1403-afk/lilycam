@@ -740,9 +740,14 @@ async fn api_clip(State(app): State<Arc<App>>, headers: HeaderMap, Query(q): Que
 /// Thử cổng RTSP trước; không vào được (bị chặn 554) thì thử RTSP-trong-HTTP qua cổng web.
 async fn probe_rtsp(ffmpeg: &std::path::Path, s: &Store, ch: u32) -> bool {
     let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, s.rtsp_port, ch);
-    if try_rtsp(ffmpeg, &url, "tcp", 9).await { return true; }
     let url_http = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, s.port, ch);
-    try_rtsp(ffmpeg, &url_http, "http", 12).await
+    // Đầu ghi bị chặn cổng RTSP thì đi thẳng RTSP-qua-HTTP, khỏi chờ 16 s vô ích.
+    if crate::hls::tcp_open(&s.host, s.rtsp_port, 3000) {
+        if try_rtsp(ffmpeg, &url, "tcp", 18).await { return true; }
+        return try_rtsp(ffmpeg, &url_http, "http", 18).await;
+    }
+    if try_rtsp(ffmpeg, &url_http, "http", 18).await { return true; }
+    try_rtsp(ffmpeg, &url, "tcp", 18).await
 }
 
 /// Lấy 1 khung hình từ URL RTSP với kiểu truyền cho trước.

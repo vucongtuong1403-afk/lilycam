@@ -55,7 +55,7 @@ fn profile_of(name: &str) -> Option<Profile> {
 }
 
 /// Mở TCP nhanh (ms) để biết cổng RTSP có vào được từ máy này không.
-fn tcp_open(host: &str, port: u16, ms: u64) -> bool {
+pub fn tcp_open(host: &str, port: u16, ms: u64) -> bool {
     use std::net::{TcpStream, ToSocketAddrs};
     let addr = match (host, port).to_socket_addrs().ok().and_then(|mut it| it.next()) {
         Some(a) => a,

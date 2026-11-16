@@ -360,6 +360,8 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |
 | Quên mật khẩu | `docker compose exec lilycam ./lilycam --reset-password` |
+| Chụp ảnh báo “Đã lưu ảnh nhưng chưa gửi được Lark” | Container chạy uid 1000 nên không đọc được `/root/.lark-cli`. Compose phải có `HOME: /app` và mount `~/.lark-cli:/app/.lark-cli`, `~/.local/share/lark-cli:/app/.local/share/lark-cli`. Kiểm tra: `docker exec lilycam /app/bin/lark-cli base +record-list --base-token … --table-id … --limit 1 --format json --as user` phải trả `"ok": true` |
+| Ảnh không lên base dù log không báo lỗi | Log có dòng `[lark] ⚠ lark-cli chưa đăng nhập …` khi khởi động — đăng nhập lại lark-cli rồi `docker compose restart` |
 
 ---
 

@@ -280,7 +280,22 @@ impl Lark {
 
     /// Nạp sẵn danh mục (gọi lúc khởi động để lần chụp ảnh đầu tiên không phải chờ).
     pub async fn warm(&self) {
-        if self.enabled { self.learn_cht().await; }
+        if !self.enabled { return; }
+        // kiểm tra sớm: lark-cli có đăng nhập được không (container chạy uid 1000
+        // nên rất dễ mất ~/.lark-cli → chụp ảnh sẽ không lên base mà không báo gì)
+        let probe = self.run(vec!["base".into(), "+record-list".into(), "--base-token".into(), self.base_token.clone(),
+            "--table-id".into(), self.table_id.clone(), "--limit".into(), "1".into(), "--format".into(), "json".into(),
+            "--as".into(), "user".into()], Duration::from_secs(60)).await;
+        match probe {
+            Ok(v) if v.get("ok").and_then(|x| x.as_bool()) == Some(true) => {}
+            Ok(v) => {
+                let msg = v.get("error").and_then(|e| e.get("message").or_else(|| e.get("subtype")))
+                    .and_then(|m| m.as_str()).unwrap_or("không rõ");
+                println!("[lark] ⚠ lark-cli chưa đăng nhập ({msg}) — ảnh sẽ KHÔNG lên Giám sát tháng");
+            }
+            Err(e) => println!("[lark] ⚠ lark-cli lỗi: {e} — ảnh sẽ KHÔNG lên Giám sát tháng"),
+        }
+        self.learn_cht().await;
     }
 
     /// Học bảng "Danh mục trưởng bộ phận": tên cơ sở → nhóm chat và người chịu trách nhiệm.
@@ -472,8 +487,17 @@ impl Lark {
         }
         let record_id = match record_id {
             Some(r) => r,
-            None => return json!({ "ok": true, "saved": format!("{day}/{name}"), "week": week, "recordId": null,
-                "url": self.base_url.clone().map(|b| format!("{b}?table={}", self.table_id)), "warning": "Chưa gửi được lên Lark" }),
+            None => {
+                // đưa lý do thật về giao diện để người dùng biết vì sao ảnh không lên base
+                let why = res.as_ref().ok()
+                    .and_then(|v| v.get("error"))
+                    .and_then(|e| e.get("message").or_else(|| e.get("subtype")).and_then(|m| m.as_str()))
+                    .unwrap_or("lark-cli không trả về record id");
+                println!("[capture] chưa gửi được Lark: {why}");
+                return json!({ "ok": true, "saved": format!("{day}/{name}"), "week": week, "recordId": null,
+                    "url": self.base_url.clone().map(|b| format!("{b}?table={}", self.table_id)),
+                    "warning": format!("Chưa gửi được lên Lark ({why})") });
+            }
         };
         let _ = self.run(vec!["base".into(), "+record-upload-attachment".into(), "--base-token".into(), self.base_token.clone(),
             "--table-id".into(), self.table_id.clone(), "--record-id".into(), record_id.clone(),

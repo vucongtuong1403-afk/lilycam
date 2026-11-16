@@ -777,7 +777,8 @@ fn spawn_health(app: Arc<App>) {
                         let list: Vec<u32> = st.channels.clone().unwrap_or_else(|| (1..=st.cameras.max(1)).collect());
                         let mut ch = list.first().copied().unwrap_or(1);
                         let mut ok = false;
-                        for cand in list.iter().take(3) {
+                        // 4 kênh đầu: nhiều đầu ghi tắt kênh 1–2 nhưng các kênh sau vẫn sống
+                        for cand in list.iter().take(4) {
                             if probe_rtsp(&ff, &st, *cand).await { ch = *cand; ok = true; break; }
                         }
                         json!({ "id": st.id, "name": st.name, "ch": ch, "ok": ok,

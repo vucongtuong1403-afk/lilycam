@@ -74,10 +74,31 @@ pub struct Hls {
     vaapi: Option<PathBuf>,
 }
 
+/// Tạo (hoặc dùng lại) thư mục ghi được dưới base; không ghi được thì thử tên khác.
+fn writable_dir(base: &std::path::Path, name: &str) -> Option<PathBuf> {
+    for attempt in 0..2 {
+        let dir = if attempt == 0 {
+            base.join(name)
+        } else {
+            base.join(format!("{name}-{}", crate::auth::now_ms()))
+        };
+        let _ = std::fs::create_dir_all(&dir);
+        let probe = dir.join(".write-test");
+        if std::fs::write(&probe, b"x").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            return Some(dir);
+        }
+    }
+    println!("  ⚠ Không ghi được thư mục hls trong {} — kiểm tra quyền (chown) thư mục data/hls", base.display());
+    None
+}
+
 impl Hls {
     pub fn new(ffmpeg: PathBuf, helper: PathBuf, sdk_lib: PathBuf, base: PathBuf, _codecs: PathBuf) -> Hls {
-        let dir = base.join(format!("p{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        // Thư mục làm việc phải GHI ĐƯỢC: nếu không, ffmpeg thoát ngay và MỌI camera 404
+        // (đã gặp: thư mục còn lại của lần chạy trước do user khác tạo).
+        let dir = writable_dir(&base, &format!("p{}", std::process::id()))
+            .unwrap_or_else(|| base.join(format!("p{}", std::process::id())));
         // dọn segment cũ trong thư mục của chính tiến trình này
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for e in rd.flatten() { let _ = std::fs::remove_file(e.path()); }
@@ -160,16 +181,67 @@ impl Hls {
         self.sweep();
         if profile.starts_with("pb") { return self.playlist_pb(store, ch, profile, file).await; }
         let key = format!("{}-{}-{}", store.id, ch, profile);
-        let dir = self.ensure(store, ch, profile, &key).await?;
-        let path = dir.join(file);
-        for _ in 0..100 {
-            if let Ok(mut f) = tokio::fs::File::open(&path).await {
-                let mut buf = Vec::new();
-                if f.read_to_end(&mut buf).await.is_ok() && !buf.is_empty() { return Some(buf); }
+        // Ngân sách chờ segment đầu: ~20 s (133 × 150 ms). Trước đây 15 s thì các đầu ghi
+        // chậm (vd 308 Võ Văn Ngân cần ~15 s để ra m3u8 đầu) luôn bị 404 oan.
+        // Nếu ffmpeg CHẾT SỚM (DESCRIBE bị từ chối, "Invalid data found"…) thì mở lại ngay
+        // một lần — nhiều đầu ghi Dahua chỉ từ chối lần mở đầu tiên rồi lần sau vào được.
+        const BUDGET: u32 = 133;
+        let mut waited = 0u32;
+        let mut retried = false;
+        let mut dir;
+        loop {
+            dir = match self.ensure(store, ch, profile, &key).await { Some(d) => d, None => return None };
+            let path = dir.join(file);
+            let mut dead = false;
+            while waited < BUDGET {
+                // giữ phiên "còn người xem" trong lúc chờ segment đầu, nếu không sweep/đuổi
+                // có thể tắt đúng phiên đang được chờ (=> 404 dù camera sống)
+                if waited % 10 == 0 { self.touch(&key); }
+                if let Ok(mut f) = tokio::fs::File::open(&path).await {
+                    let mut buf = Vec::new();
+                    if f.read_to_end(&mut buf).await.is_ok() && !buf.is_empty() { return Some(buf); }
+                }
+                waited += 1;
+                if waited % 4 == 0 && self.session_dead(&key) { dead = true; break; }
+                tokio::time::sleep(Duration::from_millis(150)).await;
             }
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            if dead && !retried && waited < BUDGET {
+                retried = true;
+                println!("[hls] thử lại {key} (ffmpeg thoát sớm)");
+                continue;
+            }
+            break;
+        }
+        // không có segment: in lý do ffmpeg ghi trong ff.log để không còn "404 im lặng"
+        if let Ok(txt) = tokio::fs::read_to_string(dir.join("ff.log")).await {
+            let why: Vec<&str> = txt.lines().filter(|l| !l.trim().is_empty()).rev().take(2).collect();
+            if !why.is_empty() {
+                println!("[hls] lỗi {key}: {}", why.into_iter().rev().collect::<Vec<_>>().join(" | "));
+            }
         }
         None
+    }
+
+    /// ffmpeg của phiên đã thoát (lỗi) chưa? Nếu rồi thì in lý do rồi dọn phiên.
+    fn session_dead(&self, key: &str) -> bool {
+        let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let dead = match m.get_mut(key) {
+            Some(s) => matches!(s.child.try_wait(), Ok(Some(_)) | Err(_)),
+            None => true,
+        };
+        if dead {
+            if let Some(mut s) = m.remove(key) {
+                let _ = s.child.start_kill();
+                if let Ok(txt) = std::fs::read_to_string(s.dir.join("ff.log")) {
+                    let why: Vec<&str> = txt.lines().filter(|l| !l.trim().is_empty()).rev().take(3).collect();
+                    if !why.is_empty() {
+                        println!("[hls] {key} ffmpeg thoát: {}", why.into_iter().rev().collect::<Vec<_>>().join(" | "));
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&s.dir);
+            }
+        }
+        dead
     }
 
     async fn ensure(&self, store: &Store, ch: u32, profile: &str, key: &str) -> Option<PathBuf> {
@@ -180,9 +252,15 @@ impl Hls {
             s.last = Instant::now();
             return Some(s.dir.clone());
         }
-        // (A) quá trần phiên → đuổi phiên lâu không ai xem nhất
+        // (A) quá trần phiên → đuổi phiên lâu không ai xem nhất.
+        // KHÔNG đuổi phiên vừa mở trong 8 s qua: người dùng vừa bấm vào ô đó, ffmpeg
+        // còn đang chờ segment đầu — đuổi nó sẽ ra "404 Chưa có" dù camera vẫn sống.
         if m.len() >= self.max {
-            if let Some(victim) = m.iter().min_by_key(|(_, s)| s.last).map(|(k, _)| k.clone()) {
+            let fresh = Duration::from_secs(8);
+            let pick = m.iter().filter(|(_, s)| s.last.elapsed() > fresh).min_by_key(|(_, s)| s.last)
+                .or_else(|| m.iter().min_by_key(|(_, s)| s.last))
+                .map(|(k, _)| k.clone());
+            if let Some(victim) = pick {
                 if let Some(mut old) = m.remove(&victim) {
                     let _ = old.child.start_kill();
                     let _ = std::fs::remove_dir_all(&old.dir);
@@ -245,12 +323,23 @@ impl Hls {
             "-hls_flags".into(), "delete_segments+omit_endlist+independent_segments+temp_file".into(),
             "-hls_segment_filename".into(), dir.join("seg%03d.ts").to_string_lossy().to_string(),
             dir.join("index.m3u8").to_string_lossy().to_string()]);
+        // ghi stderr của ffmpeg ra ff.log trong thư mục phiên: lỗi RTSP trước đây bị nuốt
+        // hoàn toàn, chỉ thấy "404 Chưa có" sau 15 s mà không biết vì sao
+        let log = std::fs::File::create(dir.join("ff.log")).ok();
         let child = Command::new(&self.ffmpeg).args(&args)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .stdin(Stdio::null()).stdout(Stdio::null())
+            .stderr(match log { Some(f) => Stdio::from(f), None => Stdio::null() })
             .spawn().ok()?;
         println!("[hls] mở {key}");
         m.insert(key.to_string(), Session { dir: dir.clone(), child, last: Instant::now(), profile: profile.to_string() });
         Some(dir)
+    }
+
+    /// Đánh dấu phiên vẫn có người chờ (dùng khi đang chờ segment đầu).
+    fn touch(&self, key: &str) {
+        if let Ok(mut m) = self.sessions.lock() {
+            if let Some(s) = m.get_mut(key) { s.last = Instant::now(); }
+        }
     }
 
     /// Làm nóng phiên HD trước khi người dùng bấm (hover ô camera).

@@ -54,6 +54,16 @@ fn profile_of(name: &str) -> Option<Profile> {
     })
 }
 
+/// Mở TCP nhanh (ms) để biết cổng RTSP có vào được từ máy này không.
+fn tcp_open(host: &str, port: u16, ms: u64) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    let addr = match (host, port).to_socket_addrs().ok().and_then(|mut it| it.next()) {
+        Some(a) => a,
+        None => return false,
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(ms)).is_ok()
+}
+
 struct Session {
     dir: PathBuf,
     child: tokio::process::Child,
@@ -72,6 +82,9 @@ pub struct Hls {
     enabled: bool,
     /// Có GPU Intel dùng được VAAPI thì giải mã + mã hoá bằng GPU, không thì libx264.
     vaapi: Option<PathBuf>,
+    /// Cơ sở nào bị chặn cổng RTSP (554) thì đi RTSP-trong-HTTP qua cổng web (80).
+    /// Nhớ kết quả theo id để không phải dò lại mỗi lần mở.
+    http_mode: Mutex<HashMap<String, bool>>,
 }
 
 /// Tạo (hoặc dùng lại) thư mục ghi được dưới base; không ghi được thì thử tên khác.
@@ -132,7 +145,7 @@ impl Hls {
                 None
             }
         };
-        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi }
+        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi, http_mode: Mutex::new(HashMap::new()) }
     }
 
     /// Phát lại bản ghi qua NetSDK (hồ sơ pbNNN).
@@ -270,16 +283,39 @@ impl Hls {
         }
         let dir = self.base.join(format!("{}-{}", key, crate::auth::now_ms()));
         let _ = std::fs::create_dir_all(&dir);
+        // Nhiều đầu ghi bị nhà mạng chặn cổng 554 nhưng vẫn mở cổng web 80 và hỗ trợ
+        // RTSP-trong-HTTP (Dahua gọi là "RTSP over HTTP"). Khi 554 không vào được thì
+        // đâm thẳng vào cổng web, ffmpeg tự dò GET/POST /cam/realmonitor.
+        let http_mode = {
+            let mut hm = self.http_mode.lock().unwrap_or_else(|e| e.into_inner());
+            match hm.get(&store.id) {
+                Some(v) => *v,
+                None => {
+                    let v = !tcp_open(&store.host, store.rtsp_port, 2500);
+                    hm.insert(store.id.clone(), v);
+                    if v { println!("[hls] {} chặn cổng {} → dùng RTSP-qua-HTTP (cổng {})", store.id, store.rtsp_port, store.port); }
+                    v
+                }
+            }
+        };
+        // RTSP-qua-HTTP đi qua đúng cổng web của đầu ghi, không phải cổng RTSP.
+        let port = if http_mode { store.port } else { store.rtsp_port };
         let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0",
-            store.user, store.pass, store.host, store.rtsp_port, ch);
+            store.user, store.pass, store.host, port, ch);
         let mut args: Vec<String> = vec!["-hide_banner".into(), "-loglevel".into(), "error".into()];
+        if http_mode {
+            args.extend(["-rtsp_transport".into(), "http".into()]);
+        }
         if let Some(dev) = &self.vaapi {
             // giải mã ngay trên GPU: khung hình không phải copy về RAM rồi encode lại
             args.extend(["-hwaccel".into(), "vaapi".into(),
                 "-hwaccel_device".into(), dev.display().to_string(),
                 "-hwaccel_output_format".into(), "vaapi".into()]);
         }
-        args.extend(["-rtsp_transport".into(), "tcp".into(), "-timeout".into(), "8000000".into(),
+        if !http_mode {
+            args.extend(["-rtsp_transport".into(), "tcp".into()]);
+        }
+        args.extend(["-timeout".into(), "8000000".into(),
             "-flags".into(), "low_delay".into(), "-i".into(), url]);
         if self.vaapi.is_some() {
             args.extend(["-c:v".into(), "h264_vaapi".into(),

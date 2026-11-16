@@ -737,16 +737,24 @@ async fn api_clip(State(app): State<Arc<App>>, headers: HeaderMap, Query(q): Que
 
 
 /// Mở thử 1 kênh RTSP, lấy 1 khung hình → coi như kênh "sống".
+/// Thử cổng RTSP trước; không vào được (bị chặn 554) thì thử RTSP-trong-HTTP qua cổng web.
 async fn probe_rtsp(ffmpeg: &std::path::Path, s: &Store, ch: u32) -> bool {
     let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, s.rtsp_port, ch);
+    if try_rtsp(ffmpeg, &url, "tcp", 9).await { return true; }
+    let url_http = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0", s.user, s.pass, s.host, s.port, ch);
+    try_rtsp(ffmpeg, &url_http, "http", 12).await
+}
+
+/// Lấy 1 khung hình từ URL RTSP với kiểu truyền cho trước.
+async fn try_rtsp(ffmpeg: &std::path::Path, url: &str, transport: &str, secs: u64) -> bool {
     let mut cmd = tokio::process::Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "6000000",
-            "-i", &url, "-frames:v", "1", "-f", "null", "-"])
+    cmd.args(["-hide_banner", "-loglevel", "error", "-rtsp_transport", transport, "-timeout", "6000000",
+            "-i", url, "-frames:v", "1", "-f", "null", "-"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     match cmd.spawn() {
-        Ok(mut c) => match tokio::time::timeout(std::time::Duration::from_secs(9), c.wait()).await {
+        Ok(mut c) => match tokio::time::timeout(std::time::Duration::from_secs(secs), c.wait()).await {
             Ok(Ok(st)) => st.success(),
             _ => { let _ = c.start_kill(); false }
         },

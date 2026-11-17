@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
@@ -14,6 +15,20 @@ fn idle_secs() -> u64 {
     std::env::var("IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(90)
 }
 fn idle() -> Duration { Duration::from_secs(idle_secs()) }
+
+/// Sau khi ffmpeg của một kênh chết sớm (mất điện, sai mật khẩu, chặn cổng…), không mở
+/// lại kênh đó trong bao lâu (giây). Trước đây trình duyệt thử lại 3 lần × mỗi ô, mỗi lần
+/// spawn một ffmpeg mới rồi chết ngay → hàng trăm tiến trình/giờ, đốt CPU và GPU vô ích.
+fn fail_backoff() -> Duration {
+    let s = std::env::var("FAIL_BACKOFF").ok().and_then(|v| v.parse().ok()).unwrap_or(20u64);
+    Duration::from_secs(s)
+}
+
+/// Phiên bị đuổi/đóng cách đây chưa quá bao lâu thì không mở lại (giây).
+const EVICT_COOLDOWN: Duration = Duration::from_secs(10);
+
+/// Lần cuối in cảnh báo "đủ phiên" (mili giây UNIX) — để không spam log mỗi request.
+static LAST_FULL_LOG: AtomicU64 = AtomicU64::new(0);
 
 struct Profile { width: u32, fps: u32, rate: u32, crf: u32, threads: u32 }
 
@@ -85,6 +100,13 @@ pub struct Hls {
     /// Cơ sở nào bị chặn cổng RTSP (554) thì đi RTSP-trong-HTTP qua cổng web (80).
     /// Nhớ kết quả theo id để không phải dò lại mỗi lần mở.
     http_mode: Mutex<HashMap<String, bool>>,
+    /// Khoá phiên đang chờ segment đầu. Trong lúc chờ, phiên mới mở KHÔNG bị đuổi dù
+    /// chưa "được xem" — trước đây bị `or_else` đuổi ngay nên ffmpeg chết rồi mở lại liên tục.
+    probing: Mutex<HashMap<String, Instant>>,
+    /// Khoá phiên vừa chết sớm → không mở lại trước mốc này (xem `fail_backoff`).
+    fail_until: Mutex<HashMap<String, Instant>>,
+    /// Khoá phiên vừa bị đuổi/đóng → không mở lại ngay, tránh đuổi–mở–đuổi vòng tròn.
+    evict_at: Mutex<HashMap<String, Instant>>,
 }
 
 /// Tạo (hoặc dùng lại) thư mục ghi được dưới base; không ghi được thì thử tên khác.
@@ -145,7 +167,8 @@ impl Hls {
                 None
             }
         };
-        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi, http_mode: Mutex::new(HashMap::new()) }
+        Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi, http_mode: Mutex::new(HashMap::new()),
+            probing: Mutex::new(HashMap::new()), fail_until: Mutex::new(HashMap::new()), evict_at: Mutex::new(HashMap::new()) }
     }
 
     /// Phát lại bản ghi qua NetSDK (hồ sơ pbNNN).
@@ -203,7 +226,10 @@ impl Hls {
         let mut retried = false;
         let mut dir;
         loop {
-            dir = match self.ensure(store, ch, profile, &key).await { Some(d) => d, None => return None };
+            self.probing.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), Instant::now());
+            let opened = self.ensure(store, ch, profile, &key).await;
+            self.probing.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+            dir = match opened { Some(d) => d, None => return None };
             let path = dir.join(file);
             let mut dead = false;
             while waited < BUDGET {
@@ -222,6 +248,12 @@ impl Hls {
                 retried = true;
                 println!("[hls] thử lại {key} (ffmpeg thoát sớm)");
                 continue;
+            }
+            if dead {
+                // chết cả lần thử lại: khoá kênh này một lúc, đừng spawn thêm ffmpeg nữa
+                self.fail_until.lock().unwrap_or_else(|e| e.into_inner())
+                    .insert(key.clone(), Instant::now() + fail_backoff());
+                println!("[hls] tạm khoá {key} trong {}s (ffmpeg lỗi liên tiếp)", fail_backoff().as_secs());
             }
             break;
         }
@@ -265,19 +297,64 @@ impl Hls {
             s.last = Instant::now();
             return Some(s.dir.clone());
         }
+        // Bị đuổi/đóng cách đây chưa lâu thì chưa mở lại: nếu không, mỗi vòng thử lại của
+        // trình duyệt lại spawn ffmpeg mới và đuổi một phiên khác → quay vòng không dừng.
+        {
+            let now = Instant::now();
+            let mut ev = self.evict_at.lock().unwrap_or_else(|e| e.into_inner());
+            ev.retain(|_, t| now.duration_since(*t) < EVICT_COOLDOWN);
+            if ev.contains_key(key) {
+                return None;
+            }
+        }
+        // ffmpeg của kênh này vừa chết sớm (mất điện, sai mật khẩu, chặn cổng…): chờ hết
+        // backoff rồi mới thử lại, thay vì spawn–chết–spawn hàng trăm lần mỗi giờ.
+        {
+            let now = Instant::now();
+            let mut fu = self.fail_until.lock().unwrap_or_else(|e| e.into_inner());
+            fu.retain(|_, t| *t > now);
+            if fu.contains_key(key) {
+                // không in mỗi request: 6 kênh × thử lại của trình duyệt sẽ ngập log.
+                // Dấu vết đã có ở dòng "[hls] tạm khoá … trong Ns" lúc khoá.
+                return None;
+            }
+        }
         // (A) quá trần phiên → đuổi phiên lâu không ai xem nhất.
         // KHÔNG đuổi phiên vừa mở trong 8 s qua: người dùng vừa bấm vào ô đó, ffmpeg
         // còn đang chờ segment đầu — đuổi nó sẽ ra "404 Chưa có" dù camera vẫn sống.
+        // Hết chỗ mà mọi phiên đều mới → trả None (ô báo "Chưa có") thay vì đuổi phiên
+        // vừa mở rồi mở lại chính nó: đó là nguồn churn lớn nhất trước đây.
         if m.len() >= self.max {
+            let now = Instant::now();
+            let probing: Vec<String> = {
+                let p = self.probing.lock().unwrap_or_else(|e| e.into_inner());
+                p.keys().cloned().collect()
+            };
             let fresh = Duration::from_secs(8);
-            let pick = m.iter().filter(|(_, s)| s.last.elapsed() > fresh).min_by_key(|(_, s)| s.last)
-                .or_else(|| m.iter().min_by_key(|(_, s)| s.last))
+            let pick = m.iter()
+                .filter(|(k, s)| !probing.contains(k) && now.duration_since(s.last) > fresh)
+                .min_by_key(|(_, s)| s.last)
                 .map(|(k, _)| k.clone());
-            if let Some(victim) = pick {
-                if let Some(mut old) = m.remove(&victim) {
-                    let _ = old.child.start_kill();
-                    let _ = std::fs::remove_dir_all(&old.dir);
-                    println!("[hls] đuổi {victim} (quá {} phiên)", self.max);
+            match pick {
+                Some(victim) => {
+                    if let Some(mut old) = m.remove(&victim) {
+                        let _ = old.child.start_kill();
+                        let _ = std::fs::remove_dir_all(&old.dir);
+                        self.evict_at.lock().unwrap_or_else(|e| e.into_inner())
+                            .insert(victim.clone(), Instant::now());
+                        println!("[hls] đuổi {victim} (quá {} phiên)", self.max);
+                    }
+                }
+                None => {
+                    // không có phiên nào đủ cũ để đuổi: báo rõ (tối đa 30 s một lần),
+                    // không đuổi bừa rồi mở lại chính khoá đó.
+                    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64).unwrap_or(0);
+                    if now_ms.saturating_sub(LAST_FULL_LOG.load(Ordering::Relaxed)) > 30_000 {
+                        LAST_FULL_LOG.store(now_ms, Ordering::Relaxed);
+                        println!("[hls] đủ {} phiên, không mở thêm {key}", self.max);
+                    }
+                    return None;
                 }
             }
         }

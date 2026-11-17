@@ -13,17 +13,24 @@ services:
       # container chạy uid 1000 nên KHÔNG đọc được /root; đặt HOME=/app để
       # lark-cli tìm thấy cấu hình ở /app/.lark-cli + /app/.local/share/lark-cli
       HOME: /app
-      # trần phiên: quá 12 thì đuổi phiên lâu nhất, tránh 10 ô + HD làm CPU vọt
-      MAX_STREAMS: "18"
-      # không ai xem quá 90 s thì tắt ffmpeg của kênh đó (trước đây 180 s và chỉ
-      # được dọn khi có request nên phiên treo hàng chục phút → CPU 90°C)
-      IDLE_SECS: "90"
-      # watchdog nhiệt: ≥ 80°C thì giữ tối đa 2 phiên, hạ dưới 65°C thì thôi
+      # trần phiên: đủ 10 ô lưới + 1 luồng xem + dự phòng. Đầy thì ô mới báo "Chưa có"
+      # thay vì đuổi phiên vừa mở (trước đây đuổi–mở vòng tròn, 1.200 lần mở/3 giờ).
+      MAX_STREAMS: "14"
+      # không ai xem quá 120 s thì tắt ffmpeg của kênh đó
+      IDLE_SECS: "120"
+      # ffmpeg của kênh chết sớm thì khoá kênh 20 s, không spawn lại liên tục
+      FAIL_BACKOFF: "20"
+      # watchdog nhiệt: chỉ cắt phiên khi ≥ 80°C suốt 30 s (3 mẫu), hạ dưới 65°C thì thôi
       TEMP_HOT: "80"
       TEMP_COOL: "65"
       # giải mã + mã hoá bằng GPU Intel (VAAPI). Đặt "0" nếu máy không có GPU
       VAAPI: "1"
       VAAPI_DEV: /dev/dri/renderD128
+    # Chặn container kéo cả máy vào OOM: 17/11 kernel đã giết 44 lần (shmem/GPU lên
+    # 27 GB), làm mất cả pipewire/gnome-shell → máy lag rồi tự khởi động lại.
+    mem_limit: 6g
+    memswap_limit: 6g
+    shm_size: 512m
     devices:
       - /dev/dri:/dev/dri
     group_add:

@@ -151,13 +151,15 @@ Lưới 2/4/6/8/10 ô cũng lấy luồng chính, server thu nhỏ sẵn cho v�
 - Luồng chính không mở được (mạng yếu, đầu ghi từ chối) → ô đó **tự** hiện ảnh/MJPEG rồi
   thử lại luồng chính ở lần sau, không cần bấm gì.
 - Mỗi phiên = 1 tiến trình `bin/ffmpeg` (~0,2 core cho ô 720p, ~0,5–1 core cho HD 1080p).
-  Tối đa **12 phiên** (`MAX_STREAMS`, đặt trong `docker-compose.yml`; code mặc định 20).
+  Tối đa **14 phiên** (`MAX_STREAMS`, đặt trong `docker-compose.yml`; code mặc định 20).
+  Khi đủ 14 phiên, ô mới hiện “Chưa có” thay vì đuổi phiên vừa mở — đuổi–mở vòng tròn
+  từng sinh hơn 1.200 tiến trình ffmpeg trong 3 giờ.
 
 ### Chế độ ngủ (tiết kiệm băng thông)
 
 - Mở web **không tự chạy camera nào**: chỉ khi bấm vào một cửa hàng thì lưới của cửa hàng đó mới mở luồng.
-- Không ai xem quá **3 phút** → phiên tự "ngủ": ffmpeg tắt, kết nối RTSP tới đầu ghi đóng, thư mục tạm xoá.
-  Thời gian ngủ cố định **180 giây** trong code (`src/hls.rs`), chưa có biến môi trường.
+- Không ai xem quá **2 phút** → phiên tự "ngủ": ffmpeg tắt, kết nối RTSP tới đầu ghi đóng, thư mục tạm xoá.
+  Thời gian ngủ đặt bằng biến môi trường `IDLE_SECS` (mặc định 120, code mặc định 90).
 - Khi mở cửa sổ xem một camera, các phiên lưới của cùng cửa hàng được nhả ngay (`/api/release`) để
   nhường băng thông; khi đủ số phiên tối đa thì phiên **lâu không ai xem nhất** bị đuổi trước.
 - Thay bằng ffmpeg khác: đặt `FFMPEG=/usr/bin/ffmpeg` trong `environment` của `docker-compose.yml`.
@@ -240,7 +242,7 @@ Mỗi ô lưới là một phiên HLS riêng (`/hls/g4/...`, `g6`, `g10`…) do 
 ô phóng to dùng `/hls/hd/...` giữ nguyên độ phân giải. Lưới **8–10 ô lấy luồng phụ**
 (`subtype=1`) của đầu ghi — ô chỉ ~300 px nên không cần 1080p, đổi lại CPU server giảm ~3 lần
 và đầu ghi không bị nghẽn upload; đầu ghi nào không có luồng phụ thì tự quay về luồng chính.
-Tối đa 12 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt sau 3 phút (cố định trong code).
+Tối đa 14 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt sau 2 phút (`IDLE_SECS`).
 
 ---
 
@@ -356,7 +358,9 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | HD cứ tự về “Nhẹ” | Đầu ghi không mở RTSP 554, mạng yếu, hoặc trình duyệt không có H.264 (Chromium thuần). Dùng Chrome/Edge/Safari |
 | Lần đầu mở HD chậm 4–6 giây | ffmpeg phải dò codec + chờ keyframe; các lần sau nhanh hơn |
 | Máy nóng / CPU cao | Bật VAAPI (xem mục 8) — giảm ~10 lần CPU. Không có GPU thì giảm `MAX_STREAMS` hoặc chọn lưới ít ô |
-| Nhiệt vẫn cao dù VAAPI | Log có `[thermal] …°C ≥ 80°C → giảm còn 2 phiên` — watchdog tự đóng bớt phiên; hạ `TEMP_HOT` nếu muốn ngưỡng thấp hơn |
+| Nhiệt vẫn cao dù VAAPI | Log có `[thermal] …°C ≥ 80°C (30 s) → giảm còn N phiên`. Watchdog chỉ cắt khi nhiệt ≥ `TEMP_HOT` suốt 30 s và mỗi lần cắt một nửa; hạ `TEMP_HOT` nếu muốn ngưỡng thấp hơn |
+| Máy lag rồi tự khởi động lại, `journalctl -k` có `invoked oom-killer` | Hết RAM do shmem/GPU (i915) chứ không phải nhiệt CPU. Compose phải có `mem_limit: 6g` + `shm_size: 512m` để container tự chết trong cgroup. Kiểm tra: `docker stats lilycam`, `grep Shmem /proc/meminfo` |
+| Mở lưới báo “Chưa có” dù camera sống | Đã đủ `MAX_STREAMS` phiên và mọi phiên đều mới mở. Log có `[hls] đủ 14 phiên, không mở thêm …`; chờ 1–2 phút hoặc tăng `MAX_STREAMS` |
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |
 | Quên mật khẩu | `docker compose exec lilycam ./lilycam --reset-password` |

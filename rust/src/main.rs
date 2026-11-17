@@ -918,6 +918,10 @@ async fn api_store_new(State(app): State<Arc<App>>, headers: HeaderMap, body: St
 
 /// Đọc nhiệt độ CPU (millidegree → °C). None nếu máy không có cảm biến.
 fn cpu_temp() -> Option<f32> {
+    // Nhiệt độ "package" của CPU: trên Intel là temp1 (Package id 0) của coretemp.
+    // Trước đây lấy MAX của mọi cảm biến nên chỉ cần một core nhảy 93 °C trong 1 giây
+    // là watchdog tưởng máy quá nhiệt và đóng gần hết phiên (đo lại ngay sau đó chỉ 60 °C).
+    let mut package: Option<f32> = None;
     let mut best: Option<f32> = None;
     if let Ok(rd) = std::fs::read_dir("/sys/class/hwmon") {
         for e in rd.flatten() {
@@ -928,6 +932,12 @@ fn cpu_temp() -> Option<f32> {
             if !(n.contains("coretemp") || n.contains("k10temp") || n.contains("zenpower") || n.contains("cpu")) {
                 continue;
             }
+            if let Ok(t) = std::fs::read_to_string(dir.join("temp1_input")) {
+                if let Ok(v) = t.trim().parse::<f32>() {
+                    let c = v / 1000.0;
+                    if c > 1.0 { package = Some(package.map_or(c, |b: f32| b.max(c))); }
+                }
+            }
             if let Ok(rd2) = std::fs::read_dir(&dir) {
                 for f in rd2.flatten() {
                     let p = f.path();
@@ -936,7 +946,7 @@ fn cpu_temp() -> Option<f32> {
                         if let Ok(t) = std::fs::read_to_string(&p) {
                             if let Ok(v) = t.trim().parse::<f32>() {
                                 let c = v / 1000.0;
-                                best = Some(best.map_or(c, |b: f32| b.max(c)));
+                                if c > 1.0 { best = Some(best.map_or(c, |b: f32| b.max(c))); }
                             }
                         }
                     }
@@ -944,6 +954,7 @@ fn cpu_temp() -> Option<f32> {
             }
         }
     }
+    if package.is_some() { return package; }
     if best.is_none() {
         for i in 0..8 {
             let p = format!("/sys/class/thermal/thermal_zone{i}/temp");
@@ -963,22 +974,29 @@ fn spawn_thermal(app: Arc<App>) {
     let hot = std::env::var("TEMP_HOT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(80.0);
     let cool = std::env::var("TEMP_COOL").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(65.0);
     tokio::spawn(async move {
-        let mut level = 0usize;
+        // Đòi 3 mẫu liên tiếp (30 s) mới hành động, và mỗi lần chỉ cắt một nửa số phiên.
+        // Trước đây 1 mẫu là cắt thẳng về 2 phiên: một spike 1 giây của một core cũng
+        // đủ đóng 16/18 phiên, người dùng mở lại → churn → CPU/GPU vọt → lại spike.
+        let mut hits = 0usize;
+        let mut last_trim: Option<std::time::Instant> = None;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             let t = match cpu_temp() { Some(t) => t, None => continue };
             let n = app.hls.count();
-            if t >= hot && n > 2 {
-                // nóng: giữ 2 phiên gần nhất được xem
-                app.hls.trim_to(2);
-                level = 1;
-                println!("[thermal] {t:.0}°C ≥ {hot:.0}°C → giảm còn 2 phiên");
-            } else if t >= hot && level == 0 {
-                level = 1;
-                println!("[thermal] {t:.0}°C cao nhưng chỉ {n} phiên");
-            } else if t <= cool && level > 0 {
-                level = 0;
-                println!("[thermal] hạ nhiệt {t:.0}°C");
+            if t >= hot {
+                hits += 1;
+            } else {
+                hits = 0;
+                if t <= cool { continue; }
+            }
+            if hits >= 3 && n > 2 {
+                if last_trim.map_or(true, |x: std::time::Instant| x.elapsed() > std::time::Duration::from_secs(60)) {
+                    let keep = (n / 2).max(2);
+                    app.hls.trim_to(keep);
+                    last_trim = Some(std::time::Instant::now());
+                    hits = 0;
+                    println!("[thermal] {t:.0}°C ≥ {hot:.0}°C (30 s) → giảm còn {keep} phiên");
+                }
             }
         }
     });

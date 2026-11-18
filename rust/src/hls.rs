@@ -107,6 +107,11 @@ pub struct Hls {
     fail_until: Mutex<HashMap<String, Instant>>,
     /// Khoá phiên vừa bị đuổi/đóng → không mở lại ngay, tránh đuổi–mở–đuổi vòng tròn.
     evict_at: Mutex<HashMap<String, Instant>>,
+    /// Kênh nào hỏng luồng chính (subtype=0) thì nhớ đã chuyển sang luồng phụ (subtype=1).
+    sub: Mutex<HashMap<String, u8>>,
+    /// Kênh có luồng chính "h264, none" (ffmpeg không đọc được thông số trong 5 MB đầu) thì
+    /// nhớ để mở lại với probesize/analyzeduration lớn hơn.
+    deep: Mutex<HashMap<String, Instant>>,
 }
 
 /// Tạo (hoặc dùng lại) thư mục ghi được dưới base; không ghi được thì thử tên khác.
@@ -168,7 +173,8 @@ impl Hls {
             }
         };
         Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi, http_mode: Mutex::new(HashMap::new()),
-            probing: Mutex::new(HashMap::new()), fail_until: Mutex::new(HashMap::new()), evict_at: Mutex::new(HashMap::new()) }
+            probing: Mutex::new(HashMap::new()), fail_until: Mutex::new(HashMap::new()), evict_at: Mutex::new(HashMap::new()),
+            sub: Mutex::new(HashMap::new()), deep: Mutex::new(HashMap::new()) }
     }
 
     /// Phát lại bản ghi qua NetSDK (hồ sơ pbNNN).
@@ -223,7 +229,9 @@ impl Hls {
         // một lần — nhiều đầu ghi Dahua chỉ từ chối lần mở đầu tiên rồi lần sau vào được.
         const BUDGET: u32 = 133;
         let mut waited = 0u32;
-        let mut retried = false;
+        // 0 = luồng chính, 1 = đọc sâu hơn, 2 = luồng phụ. Mỗi bậc chỉ thử một lần.
+        let mut stage: u8 = 0;
+        let skey = format!("{}-{}", store.id, ch);
         let mut dir;
         loop {
             self.probing.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), Instant::now());
@@ -244,16 +252,42 @@ impl Hls {
                 if waited % 4 == 0 && self.session_dead(&key) { dead = true; break; }
                 tokio::time::sleep(Duration::from_millis(150)).await;
             }
-            if dead && !retried && waited < BUDGET {
-                retried = true;
-                println!("[hls] thử lại {key} (ffmpeg thoát sớm)");
-                continue;
-            }
+            // ffmpeg thoát trước khi ra segment đầu: đi lên từng bậc thay vì bỏ cuộc ngay.
+            // KHÔNG đổi luồng khi ffmpeg vẫn sống mà chỉ chậm quá ngân sách — kênh chậm
+            // (15–20 s mới ra hình) vẫn phải giữ luồng chính, không bị hạ xuống luồng phụ.
             if dead {
-                // chết cả lần thử lại: khoá kênh này một lúc, đừng spawn thêm ffmpeg nữa
+                let cur = self.sub.lock().unwrap_or_else(|e| e.into_inner()).get(&skey).copied().unwrap_or(0);
+                if stage == 0 {
+                    // Nhiều đầu ghi trả SPS/PPS chậm: ffmpeg báo "Could not find codec parameters
+                    // for stream 0 (Video: h264, none): unspecified size" rồi thoát. Lần thử lại
+                    // đọc sâu hơn (12 MB / 5 s) — vd 186 Nguyễn Văn Cừ ch1.
+                    stage = 1;
+                    self.deep.lock().unwrap_or_else(|e| e.into_inner())
+                        .insert(skey.clone(), Instant::now() + Duration::from_secs(600));
+                    self.kill_session(&key);
+                    waited = 0;
+                    println!("[hls] thử lại {key} (đọc sâu hơn)");
+                    continue;
+                }
+                if stage == 1 && cur == 0 {
+                    // Có kênh chỉ hỏng LUỒNG CHÍNH trong khi luồng phụ vẫn sống — vd 308 Võ Văn
+                    // Ngân ch7/ch8, 186 Nguyễn Văn Cừ ch1. Thử luồng phụ trước khi báo "Chưa có".
+                    stage = 2;
+                    self.sub.lock().unwrap_or_else(|e| e.into_inner()).insert(skey.clone(), 1);
+                    self.fail_until.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+                    self.kill_session(&key);
+                    waited = 0;
+                    println!("[hls] {key} hỏng luồng chính → thử luồng phụ (subtype=1)");
+                    continue;
+                }
+                if cur == 1 {
+                    // luồng phụ cũng không xong: trả về luồng chính cho lần mở sau
+                    self.sub.lock().unwrap_or_else(|e| e.into_inner()).insert(skey.clone(), 0);
+                }
+                self.kill_session(&key);
                 self.fail_until.lock().unwrap_or_else(|e| e.into_inner())
                     .insert(key.clone(), Instant::now() + fail_backoff());
-                println!("[hls] tạm khoá {key} trong {}s (ffmpeg lỗi liên tiếp)", fail_backoff().as_secs());
+                println!("[hls] tạm khoá {key} trong {}s (không ra được hình)", fail_backoff().as_secs());
             }
             break;
         }
@@ -265,6 +299,15 @@ impl Hls {
             }
         }
         None
+    }
+
+    /// Đóng và dọn một phiên (dùng khi phải mở lại với tham số khác).
+    fn kill_session(&self, key: &str) {
+        let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(mut s) = m.remove(key) {
+            let _ = s.child.start_kill();
+            let _ = std::fs::remove_dir_all(&s.dir);
+        }
     }
 
     /// ffmpeg của phiên đã thoát (lỗi) chưa? Nếu rồi thì in lý do rồi dọn phiên.
@@ -377,8 +420,11 @@ impl Hls {
         };
         // RTSP-qua-HTTP đi qua đúng cổng web của đầu ghi, không phải cổng RTSP.
         let port = if http_mode { store.port } else { store.rtsp_port };
-        let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype=0",
-            store.user, store.pass, store.host, port, ch);
+        // Kênh hỏng luồng chính (xem playlist_file) thì nhớ dùng luồng phụ.
+        let subtype = self.sub.lock().unwrap_or_else(|e| e.into_inner())
+            .get(&format!("{}-{}", store.id, ch)).copied().unwrap_or(0);
+        let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype={}",
+            store.user, store.pass, store.host, port, ch, subtype);
         let mut args: Vec<String> = vec!["-hide_banner".into(), "-loglevel".into(), "error".into()];
         if http_mode {
             args.extend(["-rtsp_transport".into(), "http".into()]);
@@ -393,7 +439,16 @@ impl Hls {
             args.extend(["-rtsp_transport".into(), "tcp".into()]);
         }
         args.extend(["-timeout".into(), "8000000".into(),
-            "-flags".into(), "low_delay".into(), "-i".into(), url]);
+            "-flags".into(), "low_delay".into()]);
+        // Kênh từng báo "unspecified size": đọc sâu hơn để lấy được SPS/PPS.
+        let deep = self.deep.lock().unwrap_or_else(|e| e.into_inner())
+            .get(&format!("{}-{}", store.id, ch))
+            .map(|t| *t > Instant::now()).unwrap_or(false);
+        if deep {
+            args.extend(["-analyzeduration".into(), "5000000".into(),
+                "-probesize".into(), "12000000".into()]);
+        }
+        args.extend(["-i".into(), url]);
         if self.vaapi.is_some() {
             args.extend(["-c:v".into(), "h264_vaapi".into(),
                 "-b:v".into(), format!("{}k", p.rate), "-maxrate".into(), format!("{}k", p.rate),

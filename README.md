@@ -361,6 +361,8 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | Nhiệt vẫn cao dù VAAPI | Log có `[thermal] …°C ≥ 80°C (30 s) → giảm còn N phiên`. Watchdog chỉ cắt khi nhiệt ≥ `TEMP_HOT` suốt 30 s và mỗi lần cắt một nửa; hạ `TEMP_HOT` nếu muốn ngưỡng thấp hơn |
 | Máy lag rồi tự khởi động lại, `journalctl -k` có `invoked oom-killer` | Hết RAM do shmem/GPU (i915) chứ không phải nhiệt CPU. Compose phải có `mem_limit: 6g` + `shm_size: 512m` để container tự chết trong cgroup. Kiểm tra: `docker stats lilycam`, `grep Shmem /proc/meminfo` |
 | Mở lưới báo “Chưa có” dù camera sống | Đã đủ `MAX_STREAMS` phiên và mọi phiên đều mới mở. Log có `[hls] đủ 14 phiên, không mở thêm …`; chờ 1–2 phút hoặc tăng `MAX_STREAMS` |
+| Một kênh báo “Chưa có” trong khi các kênh khác cùng đầu ghi vẫn xem được | Kênh đó hỏng luồng chính nhưng còn luồng phụ: server tự chuyển sang luồng phụ (log có `[hls] … hỏng luồng chính → thử luồng phụ (subtype=1)`) và nhớ cho lần mở sau. Hình nét thấp hơn (352×288). Nếu cả hai luồng cùng chết thì kênh không có tín hiệu — kiểm tra camera/nguồn tại chỗ |
+| Ảnh chụp (snapshot) trắng hoặc 502 nhưng xem live vẫn được | Sai cổng web của đầu ghi trong `data/cameras.json` (ví dụ cấu hình 8181 nhưng cổng mở là 81). Dò cổng rồi sửa `port`, khởi động lại container |
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |
 | Quên mật khẩu | `docker compose exec lilycam ./lilycam --reset-password` |

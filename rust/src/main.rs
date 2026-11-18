@@ -48,7 +48,8 @@ pub struct App {
     pub ffmpeg: PathBuf,
     pub stores: Vec<Store>,
     pub by_id: HashMap<String, Store>,
-    pub users: Users,
+    /// Đọc/ghi được lúc chạy để đổi mật khẩu không cần khởi động lại.
+    pub users: std::sync::RwLock<Users>,
     pub secret: Vec<u8>,
     pub hls: Arc<Hls>,
     pub snap: dahua::SnapCache,
@@ -126,11 +127,21 @@ fn set_password(data: &std::path::Path, user: &str, pass: &str) -> std::io::Resu
     scrypt::scrypt(pass.as_bytes(), salt.as_bytes(), &params, &mut out).expect("scrypt");
     let hash: String = out.iter().map(|b| format!("{b:02x}")).collect();
     let users = doc.get_mut("users").and_then(|u| u.as_array_mut()).expect("users");
-    let rec = json!({ "username": user, "salt": salt, "hash": hash, "createdAt": crate::lark::iso_local(crate::lark::Dt::now()) });
-    if let Some(existing) = users.iter_mut().find(|u| u.get("username").and_then(|x| x.as_str()) == Some(user)) {
-        *existing = rec;
+    // Đổi mật khẩu KHÔNG được xoá phạm vi xem (allowed) hay ngày tạo của tài khoản:
+    // trước đây bản ghi bị thay bằng object mới nên linhcns/giangketoan mất giới hạn
+    // và nhìn thấy toàn bộ 38 cơ sở sau mỗi lần đổi mật khẩu.
+    let now_iso = crate::lark::iso_local(crate::lark::Dt::now());
+    if let Some(existing) = users.iter_mut().find(|u| {
+        u.get("username").and_then(|x| x.as_str()).map(|x| x.eq_ignore_ascii_case(user)).unwrap_or(false)
+    }) {
+        if let Some(o) = existing.as_object_mut() {
+            o.insert("salt".into(), json!(salt));
+            o.insert("hash".into(), json!(hash));
+            o.entry("createdAt".to_string()).or_insert_with(|| json!(now_iso));
+            o.insert("updatedAt".into(), json!(now_iso));
+        }
     } else {
-        users.push(rec);
+        users.push(json!({ "username": user, "salt": salt, "hash": hash, "createdAt": now_iso }));
     }
     std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap_or_default())?;
     println!("Đã đặt mật khẩu cho '{user}' trong {}", path.display());
@@ -199,7 +210,7 @@ async fn main() {
     let zones = lark::Zones::load(&zones_path);
     let lark = lark::Lark::load(&data);
 
-    let app = Arc::new(App { root, data, public, ffmpeg, stores, by_id, users, secret, hls, snap, zones, lark, zones_path, codes: Default::default(), login_attempts: Default::default(), overrides: Default::default(), cam_health: Default::default() });
+    let app = Arc::new(App { root, data, public, ffmpeg, stores, by_id, users: std::sync::RwLock::new(users), secret, hls, snap, zones, lark, zones_path, codes: Default::default(), login_attempts: Default::default(), overrides: Default::default(), cam_health: Default::default() });
 
     spawn_health(app.clone());
     {
@@ -225,6 +236,7 @@ async fn main() {
         .route("/api/login", post(api_login))
         .route("/api/logout", post(api_logout))
         .route("/api/session", get(api_session))
+        .route("/api/password", post(api_password))
         .route("/api/stores", get(api_stores))
         .route("/api/stats", get(api_stats))
         .route("/api/clip", get(api_clip))
@@ -310,7 +322,8 @@ impl App {
     }
     /// Phạm vi của tài khoản (trường "allowed" trong data/users.json). None = xem tất cả.
     fn scope_of(&self, user: &str) -> Option<auth::Allowed> {
-        self.users.list.iter()
+        self.users.read().ok()?
+            .list.iter()
             .find(|u| u.username.eq_ignore_ascii_case(user))
             .and_then(|u| u.allowed.clone())
     }
@@ -351,7 +364,8 @@ async fn api_login(State(app): State<Arc<App>>, headers: HeaderMap, body: String
             return err_res(StatusCode::TOO_MANY_REQUESTS, "Tài khoản bị tạm khoá 10 phút do sai nhiều lần.");
         }
     }
-    if user.is_empty() || !app.users.verify(&user, pass) {
+    let ok_user = !user.is_empty() && app.users.read().map(|u| u.verify(&user, pass)).unwrap_or(false);
+    if !ok_user {
         if let Ok(mut m) = app.login_attempts.lock() {
             if let Some(e) = m.get_mut(&key) { e.0 += 1; }
         }
@@ -386,6 +400,27 @@ async fn api_session(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
         Some(u) => json_res(StatusCode::OK, json!({ "user": u })),
         None => err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập"),
     }
+}
+
+/// Đổi mật khẩu của chính tài khoản đang đăng nhập (hộp thoại "Đổi mật khẩu" trên web).
+/// Bản Rust trước đây thiếu route này nên bấm đổi mật khẩu luôn ra 405.
+async fn api_password(State(app): State<Arc<App>>, headers: HeaderMap, body: String) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
+    let v: Value = match serde_json::from_str(&body) { Ok(v) => v, Err(_) => return err_res(StatusCode::BAD_REQUEST, "JSON không hợp lệ") };
+    let cur = v.get("current").and_then(|x| x.as_str()).unwrap_or("");
+    let next = v.get("next").and_then(|x| x.as_str()).unwrap_or("");
+    if next.chars().count() < 6 {
+        return err_res(StatusCode::BAD_REQUEST, "Mật khẩu mới phải từ 6 ký tự.");
+    }
+    let ok = app.users.read().map(|u| u.verify(&user, cur)).unwrap_or(false);
+    if !ok { return err_res(StatusCode::UNAUTHORIZED, "Mật khẩu hiện tại không đúng."); }
+    if let Err(e) = set_password(&app.data, &user, next) {
+        return err_res(StatusCode::INTERNAL_SERVER_ERROR, &format!("Không ghi được users.json: {e}"));
+    }
+    // nạp lại để mật khẩu mới có hiệu lực ngay, không phải khởi động lại dịch vụ
+    if let Ok(mut u) = app.users.write() { *u = Users::load(&app.data.join("users.json")); }
+    println!("[auth] {user} đổi mật khẩu");
+    json_res(StatusCode::OK, json!({ "ok": true }))
 }
 
 async fn api_stores(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {

@@ -227,7 +227,7 @@ Muốn mở chi tiết bản ghi thay vì bảng thì đặt `"open": "record"` 
 ## 4. Cách hoạt động tổng thể
 
 ```
-Trình duyệt ──► LilyCam (Node) ──HTTP Digest──► Ảnh JPEG (lưới camera)
+Trình duyệt ──► LilyCam (Rust) ──HTTP Digest──► Ảnh JPEG (lưới camera)
      │                │
      │                └──RTSP───────────────► ffmpeg ──► HLS (xem HD)
      └── chỉ nhận ảnh / video, không thấy IP – tài khoản – mật khẩu camera
@@ -252,6 +252,7 @@ Tối đa 14 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt 
 | Đăng nhập | Mật khẩu hash **scrypt** (N=16384), so sánh timing-safe |
 | Phân quyền | `data/users.json`: tài khoản có trường `allowed` chỉ thấy cơ sở / kênh trong danh sách; không có trường này thì thấy tất cả |
 | Phiên | Cookie `HttpOnly; SameSite=Lax`, ký **HMAC-SHA256**, hết hạn sau 12 giờ |
+| Đổi mật khẩu | `POST /api/password` (nút menu góc phải) — kiểm mật khẩu hiện tại, tối thiểu 6 ký tự, giữ nguyên phạm vi `allowed` của tài khoản |
 | Chống dò | 10 lần / 10 phút mỗi IP, 8 lần / 10 phút mỗi tài khoản + delay 350 ms |
 | Header | CSP chặt (kể cả `worker-src blob:` cho hls.js), `X-Frame-Options: DENY`, `nosniff` |
 | Dữ liệu | Mật khẩu camera chỉ ở `data/cameras.json` (quyền 600) trên máy chủ |

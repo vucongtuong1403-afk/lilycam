@@ -21,3 +21,6 @@ node_modules/
 
 # ---- cấu hình docker tạm trong dự án ----
 .docker/
+
+# ---- thư mục nháp khi gỡ lỗi playback ----
+.pbtest/

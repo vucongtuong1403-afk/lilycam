@@ -588,9 +588,11 @@ impl App {
         if !helper.exists() { return Vec::new(); }
         let mut all: Vec<(i64, i64)> = Vec::new();
         for ftype in [0, 2] {
+            // Helper nói chuyện bằng giao thức NetSDK trên cổng 37777, KHÔNG phải cổng web;
+            // kênh cũng đánh từ 0 nên phải đổi như lúc mở phiên phát.
             let out = tokio::process::Command::new(&helper)
-                .args([store.host.as_str(), &store.port.max(1).to_string(), &store.user, &store.pass,
-                    &ch.to_string(), &start.to_string(), &end.to_string(), "5"])
+                .args([store.host.as_str(), &store.sdk_port.max(1).to_string(), &store.user, &store.pass,
+                    &netsdk::sdk_channel(ch).to_string(), &start.to_string(), &end.to_string(), "5"])
                 .env("PB_LIST", "1")
                 .env("PB_LIST_TYPE", ftype.to_string())
                 .env("LD_LIBRARY_PATH", self.root.join("sdk/lib"))

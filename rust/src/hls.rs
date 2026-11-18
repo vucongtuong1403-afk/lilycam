@@ -193,6 +193,22 @@ impl Hls {
                 d
             }
             None => {
+                // Mỗi lần tua ra ngoài vùng đã tải sẽ mở cửa sổ mới cho cùng kênh. Đóng
+                // ngay cửa sổ cũ của kênh đó, nếu không mỗi lần tua lại bỏ lại một ffmpeg
+                // và một kết nối NetSDK tới đầu ghi.
+                let prefix = format!("{}-{}-pb", store.id, ch);
+                {
+                    let mut pb = self.pb.lock().unwrap_or_else(|e| e.into_inner());
+                    let stale: Vec<String> = pb.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+                    for k in stale {
+                        if let Some(mut old) = pb.remove(&k) {
+                            let _ = old.helper.start_kill();
+                            let _ = old.ff.start_kill();
+                            let _ = std::fs::remove_dir_all(&old.dir);
+                            println!("[netsdk] đóng {k} (chuyển cửa sổ)");
+                        }
+                    }
+                }
                 let dir = self.base.join(format!("{}-{}", key, crate::auth::now_ms()));
                 let sess = crate::netsdk::start(&self.helper, &self.sdk_lib, &self.ffmpeg, store, ch, start, &dir, self.vaapi.as_deref()).await?;
                 println!("[netsdk] mở {key}");

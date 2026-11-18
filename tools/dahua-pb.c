@@ -11,6 +11,7 @@
 static LLONG g_login = 0;
 static LLONG g_play = 0;
 static volatile int g_stop = 0;
+static int g_raw = 0; /* 1 = xuất nguyên DHAV (không bóc header) */
 
 static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
@@ -45,6 +46,12 @@ static unsigned long long g_calls[8];
 static int CALLBACK data_cb(LLONG h, DWORD type, BYTE *buf, DWORD size, LDWORD user) {
   (void)h; (void)user;
   if (type < 8) { g_calls[type]++; g_bytes[type] += size; }
+  if (g_raw && type == 0 && size > 0 && buf) {
+    /* PB_RAW: đẩy nguyên khối DHAV ra stdout để ffmpeg tự bóc (demuxer "dhav"). */
+    if (fwrite(buf, 1, size, stdout) != size) g_stop = 1;
+    fflush(stdout);
+    return 0;
+  }
   if (type == 0 && size > 0 && buf) {
     if (pendLen + size > sizeof(pend)) drain(0);
     if (size <= sizeof(pend) - pendLen) {
@@ -162,13 +169,22 @@ int main(int argc, char **argv) {
 
   const char *dls = getenv("PB_DLSTREAM");
   if (dls && *dls) {
+    /* PB_SPEED chỉ có tác dụng với DownloadByTimeEx, không với PlayBackByTime* */
+    const char *dspd = getenv("PB_SPEED");
+    if (getenv("PB_RAW") && *getenv("PB_RAW")) g_raw = 1;
     g_play = CLIENT_DownloadByTimeEx(g_login, channel, 0, &st, &sp, NULL, NULL, 0, data_cb, 0, NULL);
     if (!g_play) { fprintf(stderr, "download stream failed: %d\n", CLIENT_GetLastError()); return 3; }
+    if (dspd) {
+      int v = atoi(dspd);
+      CLIENT_SetPlayBackSpeed(g_play, (EM_PLAY_BACK_SPEED)v);
+      fprintf(stderr, "speed=%d\n", v);
+    }
     fprintf(stderr, "download streaming\n");
     time_t t0 = time(NULL);
     while (!g_stop && time(NULL) - t0 < maxsec) {
       sleep(1);
-      if (end > 0 && time(NULL) > end + 5) break;
+      /* 'end' là mốc trong bản ghi, không phải giờ tường: chỉ cắt khi mốc đó ở tương lai. */
+      if (end > t0 + 60 && time(NULL) > end + 5) break;
     }
     drain(1);
     for (int i = 0; i < 8; i++)
@@ -215,7 +231,7 @@ int main(int argc, char **argv) {
   while (!g_stop) {
     sleep(1);
     if (time(NULL) - began > maxsec) break;
-    if (end > 0 && time(NULL) > end) break;
+    if (end > began + 60 && time(NULL) > end) break;
   }
 
   drain(1);

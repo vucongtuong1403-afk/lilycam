@@ -21,6 +21,8 @@ const state = {
   pbDay: null,    // đầu ngày (ms) đang hiển thị trên timeline
   pbSegs: [],     // các đoạn có bản ghi trong ngày
   pbT0: 0,        // thời điểm bắt đầu phát (để chạy con trỏ)
+  pbStart: 0,     // giây bản ghi ứng với currentTime = 0 của phiên đang phát
+  pbCur: 0,       // mốc thời gian đang phát (ms), cập nhật theo currentTime
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -652,6 +654,8 @@ function stopPlayback() {
   clearInterval(state.pbTimer);
   state.pbTimer = null;
   hdTimer = null;
+  state.pbStart = 0;
+  state.pbCur = 0;
   if (hlsPlayer) {
     try { hlsPlayer.destroy(); } catch {}
     hlsPlayer = null;
@@ -876,12 +880,20 @@ async function loadRecords(storeId, ch) {
   } catch { /* không có dữ liệu timeline */ }
 }
 
+/* Con trỏ timeline bám theo thời gian THẬT của video (playlist kiểu EVENT nên
+   currentTime = số giây đã phát tính từ mốc mở phiên). Nhờ vậy tạm dừng, đổi tốc
+   độ và tua đều hiện đúng vị trí. */
 function updatePlayhead() {
   const head = $('#tlHead');
   if (!head || !state.playback) return;
-  const day = state.pbDay || dayStart(new Date(state.playback));
-  const cur = state.playback + (Date.now() - state.pbT0);
-  const pct = Math.min(100, Math.max(0, ((cur - day) / 86400e3) * 100));
+  const v = $('#playerVideo');
+  let cur = state.pbCur || state.playback;
+  if (v && !v.hidden && state.pbStart && v.readyState >= 1) {
+    cur = (state.pbStart + v.currentTime) * 1000;
+    state.pbCur = cur;
+  }
+  const { start, span } = pbView();
+  const pct = Math.min(100, Math.max(0, ((cur - start) / span) * 100));
   head.style.left = pct + '%';
   $('#pbTime').textContent = fmtDT(cur);
 }
@@ -907,6 +919,18 @@ function seekTo(ms, quiet) {
   }
   state.playback = t;
   state.pbDay = dayStart(new Date(state.playback));
+
+  // Đang phát và mốc mới nằm trong vùng đã tải → tua tại chỗ, không mở lại phiên
+  const v = $('#playerVideo');
+  const offset = t / 1000 - state.pbStart;
+  if (v && !v.hidden && state.pbStart && offset >= 0 && offset < (v.duration || 0) - 1) {
+    try { v.currentTime = offset; } catch {}
+    state.pbCur = t;
+    updatePlayhead();
+    renderTimeline();
+    loadRecords(store.id, state.viewer.ch);
+    return;
+  }
   renderViewer();
   loadRecords(store.id, state.viewer.ch);
 }
@@ -945,6 +969,8 @@ function startPlayback(s, ch) {
   state.pbTimer = setInterval(updatePlayhead, 1000);
 
   const sec = Math.floor(state.playback / 1000);
+  state.pbStart = sec;
+  state.pbCur = state.playback;
   const url = `/hls/pb${sec}/${encodeURIComponent(s.id)}/${ch}/index.m3u8`;
   const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
 
@@ -957,13 +983,16 @@ function startPlayback(s, ch) {
   }, 25000);
 
   if (window.Hls && Hls.isSupported()) {
+    // Playlist kiểu EVENT (giữ toàn bộ segment, không có ENDLIST) nên HLS.js vẫn coi là
+    // luồng sống; phải chỉ định startPosition 0 để phát từ đúng giây được chọn thay vì
+    // nhảy tới mép cuối. backBufferLength lớn để tua lùi trong vùng đã tải không phải tải lại.
     const inst = new Hls({
       enableWorker: true,
       lowLatencyMode: false,
-      liveSyncDurationCount: 2,
-      maxBufferLength: 30,
-      backBufferLength: 30,
-      maxLiveSyncPlaybackRate: 1.2,
+      startPosition: 0,
+      maxBufferLength: 60,
+      maxMaxBufferLength: 120,
+      backBufferLength: 600,
       manifestLoadingTimeOut: 20000,
       fragLoadingTimeOut: 20000,
     });
@@ -1023,10 +1052,8 @@ function openPlaybackDialog() {
     b.append(note);
     api('/api/pbcheck/' + encodeURIComponent(s.id))
       .then((r) => {
-        note.className = 'hint ' + (r.supported ? 'ok' : 'warn');
-        if (r.engine === 'rtsp') note.textContent = 'Đầu ghi hỗ trợ xem lại qua RTSP — mở gần như tức thì.';
-        else if (r.engine === 'netsdk') note.textContent = 'Đầu ghi không mở RTSP playback — web sẽ lấy bản ghi qua Dahua NetSDK (chờ ~5–10 giây).';
-        else note.textContent = 'Chưa hỗ trợ xem lại cho đầu ghi này.';
+        note.className = 'hint ok';
+        note.textContent = 'Bản ghi lấy qua Dahua NetSDK — hình ra sau khoảng 2–5 giây.';
       })
       .catch(() => { note.remove(); });
   }, async () => {
@@ -1399,11 +1426,28 @@ tl.addEventListener('wheel', (e) => {
   renderTimeline();
 }, { passive: false });
 
-// tốc độ phát
+// tốc độ phát: playlist kiểu EVENT có độ dài xác định nên đổi playbackRate là đổi
+// tốc độ thật (0.5× chậm lại, 4× tua nhanh) — không cần máy chủ mã hoá lại.
 $('#pbSpeed').addEventListener('change', (e) => {
   const r = Number(e.target.value) || 1;
   const v = $('#playerVideo');
   if (v) v.playbackRate = r;
+});
+
+// tạm dừng / phát tiếp
+function togglePause() {
+  const v = $('#playerVideo');
+  const btn = $('#pbPause');
+  if (!v || v.hidden) return;
+  if (v.paused) { v.play().catch(() => {}); btn.textContent = '⏸'; btn.title = 'Tạm dừng (Space)'; }
+  else { v.pause(); btn.textContent = '▶'; btn.title = 'Phát tiếp (Space)'; }
+}
+$('#pbPause').addEventListener('click', togglePause);
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || !state.playback) return;
+  if (e.target.closest('input, textarea, select, button')) return;
+  e.preventDefault();
+  togglePause();
 });
 $('#pbLive').addEventListener('click', () => {
   state.playback = null;

@@ -108,21 +108,24 @@ Băng thông mỗi ô lưới (đã thu nhỏ sẵn ở server):
   Bấm/kéo trên timeline để tua tới giờ cần xem; nếu rơi vào khoảng trống, web tự nhảy tới đoạn
   gần nhất và báo. Nút **‹ ›** đổi ngày, **Chọn giờ** để nhập chính xác, **Về live** trở lại.
   Dữ liệu đoạn ghi lấy qua NetSDK (`CLIENT_QueryRecordFile`), cache 5 phút.
-- Kỹ thuật: server mở `rtsp://…/cam/playback?channel=N&subtype=0&starttime=…&endtime=…`
-  rồi đóng gói HLS như luồng live (H.264 copy, HEVC transcode, audio AAC).
+- Điều khiển: **⏸ tạm dừng / phát tiếp** (hoặc phím **Space**), **tốc độ 0.5× / 1× / 1.5× / 2× / 4×**,
+  **✂ Cắt clip** để tải đoạn đang chọn về máy dạng MP4 1080p.
+- Kỹ thuật: `bin/dahua-pb` mở phiên NetSDK tới đầu ghi và đẩy **nguyên khối DHAV** ra ống;
+  ffmpeg đọc bằng demuxer `dhav` (tự bóc header 44 byte, tự đồng bộ lại sau mỗi khối) rồi
+  đóng gói HLS 2 giây/segment. Không bóc header bằng tay, không dùng `-ss` (demuxer dhav bỏ qua).
 
-**Hai engine, tự chọn theo từng đầu ghi:**
+**Cách phát:**
 
-| Engine | Dùng khi | Cách chạy |
-|---|---|---|
-| RTSP `/cam/playback` | đầu ghi mở playback RTSP (hiện: 20 Hồ Tùng Mậu) | ffmpeg đọc trực tiếp, mở trong ~3–6 giây |
-| **Dahua NetSDK** | mọi đầu ghi còn lại | `bin/dahua-pb` tải đoạn ghi về (nhanh hơn thời gian thực), bóc header DHAV, đẩy vào ffmpeg `-re` → HLS. Mở ~8–15 giây |
-
-- Bản ghi được tải song song với lúc phát: server đợi ~4 giây đệm rồi mới trả luồng,
-  ffmpeg phát đúng 1× (`-re`) nên không bị trượt cửa sổ HLS → phát mượt, đệm luôn 3–5 giây.
-  Chờ ban đầu ~5–10 giây (có ghi rõ trên màn hình).
-- Cửa sổ tải tối đa **10 phút** quanh mốc đã chọn (`maxSec = 600` trong `lib/netsdk.js`); muốn xem xa hơn bấm **Chọn giờ**.
-- Mỗi phiên tạm chiếm ~150–200 MB trong `data/pb`, **tự xoá** khi đóng hoặc sau 30 giây không xem.
+- Playlist kiểu **EVENT** (`#EXT-X-PLAYLIST-TYPE:EVENT`, không có `ENDLIST`): danh sách chỉ dài
+  thêm, nên trình phát coi đây là bản ghi xác định độ dài — đổi tốc độ bằng `playbackRate` là
+  đổi tốc độ thật, tạm dừng là `video.pause()`, không cần máy chủ mã hoá lại.
+- Server đọc bản ghi nhanh gấp đôi thời gian thực (`-readrate 2`, `-readrate_initial_burst 8`)
+  nên segment đầu ra sau ~2 giây và luôn có đệm phía trước để tua trong vùng đã tải.
+- Cửa sổ tải mỗi phiên **60 phút** (`MAX_WINDOW` trong `rust/src/netsdk.rs`). Tua ra ngoài vùng
+  đã tải thì server mở cửa sổ mới quanh mốc đó và **đóng ngay cửa sổ cũ cùng kênh** — không
+  bỏ lại ffmpeg hay kết nối NetSDK nào.
+- Mỗi phiên tạm nằm trong `data/hls/`, **tự xoá** khi đóng hoặc sau `IDLE_SECS` giây không xem.
+- Chờ ban đầu ~2–5 giây (có ghi rõ trên màn hình).
 - SDK kèm trong `sdk/` (~97 MB: `libdhnetsdk.so`, `libdhconfigsdk.so`, `libavnetsdk.so`…), helper C ở `bin/dahua-pb` (nguồn: `tools/dahua-pb.c`, build lại bằng `make -C tools`).
 - ⚠️ Thư viện NetSDK lấy từ mirror công khai trên GitHub, **không phải bản phát hành chính thức từ Dahua** — nếu triển khai thương mại/cho khách hàng thì nên tải bản chính thức từ trang developer của Dahua và thay vào `sdk/lib`.
 
@@ -188,8 +191,8 @@ Chọn xong là hình ép đúng tỉ lệ đó và **ghi nhớ** cho lần sau 
 | ✕ | Đóng |
 
 **Nhấp đúp chuột trái** vào cửa sổ cam = phóng to / thu nhỏ toàn màn hình.
-Phím tắt: `Z` kính lúp · `P` xem lại · `M` tiếng · `C` chụp ảnh · `S` lưu ảnh ·
-`F` toàn màn hình · `←/→` đổi camera · `Esc` đóng.
+Phím tắt: `Z` kính lúp · `P` xem lại · `Space` tạm dừng/phát tiếp khi xem lại ·
+`M` tiếng · `C` chụp ảnh · `S` lưu ảnh · `F` toàn màn hình · `←/→` đổi camera · `Esc` đóng.
 
 ### Cấu hình nút Chụp ảnh (Lark "Giám sát tháng")
 

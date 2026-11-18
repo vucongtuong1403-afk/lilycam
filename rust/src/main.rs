@@ -70,6 +70,10 @@ fn uptime_secs() -> u64 {
     START.get_or_init(std::time::Instant::now).elapsed().as_secs()
 }
 
+/// Gọi ngay khi khởi động: nếu chỉ khởi tạo ở lần đọc /api/stats đầu tiên thì
+/// uptimeSec luôn tính từ lúc có người mở trang, không phải từ lúc chạy.
+fn mark_start() { START.get_or_init(std::time::Instant::now); }
+
 /// Chờ Ctrl+C hoặc SIGTERM (systemd stop) để dọn phiên trước khi thoát.
 async fn shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
@@ -135,6 +139,7 @@ fn set_password(data: &std::path::Path, user: &str, pass: &str) -> std::io::Resu
 
 #[tokio::main]
 async fn main() {
+    mark_start();
     let root = std::env::var("LILYCAM_ROOT").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
     let root = std::fs::canonicalize(&root).unwrap_or(root);
     let data = root.join("data");

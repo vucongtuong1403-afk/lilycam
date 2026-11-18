@@ -18,6 +18,9 @@ services:
       MAX_STREAMS: "14"
       # không ai xem quá 120 s thì tắt ffmpeg của kênh đó
       IDLE_SECS: "120"
+      # phiên XEM LẠI giữ lâu hơn (240 s): người dùng hay dừng hình xem kỹ mà hls.js
+      # không gọi playlist khi video đang pause nên phiên trông như "không ai xem"
+      PB_IDLE: "240"
       # ffmpeg của kênh chết sớm thì khoá kênh 20 s, không spawn lại liên tục
       FAIL_BACKOFF: "20"
       # watchdog nhiệt: chỉ cắt phiên khi ≥ 90°C suốt 30 s (3 mẫu) VÀ LilyCam đang

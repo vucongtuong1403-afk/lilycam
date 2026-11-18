@@ -176,6 +176,10 @@ function renderStores() {
 function selectStore(id, keepScroll = false) {
   const s = state.stores.find((x) => x.id === id);
   if (!s) return;
+  // rời cơ sở cũ → cho nó ngủ, trừ khi cửa sổ xem đang mở đúng cơ sở đó
+  const prevStore = state.currentId;
+  const viewingPrev = !$('#viewer').hidden && state.viewer.id === prevStore;
+  if (prevStore && prevStore !== id && !viewingPrev) sleepStore(prevStore);
   if (state.currentId !== id) state.page = 0;
   state.currentId = id;
   $('#emptyState').hidden = true;
@@ -503,6 +507,7 @@ window.addEventListener('resize', () => {
 });
 
 function showEmpty() {
+  sleepStore(state.currentId);
   state.currentId = null;
   stopTiles();
   if ($('#storeView')) $('#storeView').hidden = true;
@@ -513,6 +518,14 @@ function resumeTiles() {
   if (!state.currentId || document.hidden || !$('#viewer').hidden) return;
   const s = state.stores.find((x) => x.id === state.currentId);
   if (s) renderGrid(s);
+}
+
+// Cho một cơ sở "ngủ" ở phía server: đóng hết ffmpeg/RTSP của cơ sở đó (lưới, HD, xem lại)
+// để dồn CPU, băng thông và kết nối đầu ghi cho cơ sở đang xem. keepalive để lệnh vẫn
+// đi được khi tab vừa bị ẩn hay trang vừa đóng.
+function sleepStore(id) {
+  if (!id) return;
+  fetch(`/api/sleep/${encodeURIComponent(id)}`, { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
 }
 
 function updateOnline(id, ok) {
@@ -570,7 +583,7 @@ function openViewer(storeId, ch) {
   }
   // nhường kết nối cho luồng phóng to: tắt lưới ở client + đóng phiên ffmpeg lưới ở server
   stopTiles();
-  const keepQ = promoted ? `?keep=${ch}` : '';
+  const keepQ = `?keep=${ch}`;
   const release = fetch(`/api/release/${encodeURIComponent(storeId)}${keepQ}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   state.viewer.id = storeId;
   state.viewer.ch = ch;
@@ -730,6 +743,10 @@ async function renderViewer() {
   const s = state.stores.find((x) => x.id === state.viewer.id);
   if (!s) return;
   const ch = state.viewer.ch;
+  // chuyển kênh: chỉ giữ đúng kênh đang xem, đóng phiên HD/lưới của kênh cũ
+  if (!state.playback) {
+    fetch(`/api/release/${encodeURIComponent(state.viewer.id)}?keep=${ch}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  }
   clearInterval(state.viewer.fallback);
   state.viewer.fallback = null;
   stopPlayback();
@@ -921,6 +938,8 @@ function updatePbBar() {
 function startPlayback(s, ch) {
   const video = $('#playerVideo');
   const img = $('#playerImg');
+  // xem lại: đóng phiên live (lưới + HD) của cơ sở để đầu ghi chỉ phục vụ 1 phiên playback
+  sleepStore(s.id);
   const msg = $('#playerMsg');
   img.hidden = true;
   img.removeAttribute('src');
@@ -1209,6 +1228,8 @@ function closeViewer() {
   state.viewer.panY = 0;
   applyZoom();
   state.viewer.closing = false;
+  // đóng phiên HD (và phiên xem lại) của cơ sở vừa xem; lưới sẽ mở lại sau 150 ms
+  fetch(`/api/release/${encodeURIComponent(state.viewer.id)}`, { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
   setTimeout(resumeTiles, 150);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
@@ -2204,9 +2225,19 @@ $('#retryStore').addEventListener('click', async () => {
   }
 });
 
+// Đóng tab / chuyển trang → cho cơ sở đang xem ngủ, không để ffmpeg mồ côi ở server.
+window.addEventListener('pagehide', () => { if (state.currentId) sleepStore(state.currentId); });
+
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stopTiles();
-  else resumeTiles();
+  if (document.hidden) {
+    // ẩn tab = không ai xem: đóng hết phiên của cơ sở đang xem, chỉ mở lại khi quay lại
+    sleepStore(state.currentId);
+    stopTiles();
+  } else if (!$('#viewer').hidden && state.viewer.id) {
+    renderViewer(); // đang mở cửa sổ xem thì dựng lại luồng vừa bị đóng
+  } else {
+    resumeTiles();
+  }
 });
 
 window.addEventListener('hashchange', () => {

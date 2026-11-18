@@ -251,6 +251,7 @@ async fn main() {
         .route("/api/cameras/health/{store}", get(api_cam_health_one))
         .route("/api/warm/{store}/{ch}", post(api_warm))
         .route("/api/release/{store}", post(api_release))
+        .route("/api/sleep/{store}", post(api_sleep))
         .route("/api/probe/{store}", post(api_probe))
         .route("/api/dvr/{store}", get(api_dvr))
         .route("/api/pbcheck/{store}", get(api_pbcheck))
@@ -612,10 +613,19 @@ async fn api_warm(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)
     json_res(StatusCode::OK, json!({ "ok": true }))
 }
 
-async fn api_release(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+async fn api_release(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>, Query(q): Query<HashMap<String, String>>) -> Response {
     if let Err(r) = need_user(&app, &headers) { return r; }
     if app.store(&id).is_none() { return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này"); }
-    app.hls.release(&id);
+    let keep = q.get("keep").and_then(|v| v.parse::<u32>().ok());
+    app.hls.release(&id, keep);
+    json_res(StatusCode::OK, json!({ "ok": true }))
+}
+
+/// Cho cơ sở đi ngủ: đóng mọi phiên (lưới, HD, xem lại) để dồn tài nguyên cho cơ sở khác.
+async fn api_sleep(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
+    if app.store(&id).is_none() { return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này"); }
+    app.hls.sleep_store(&id);
     json_res(StatusCode::OK, json!({ "ok": true }))
 }
 

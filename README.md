@@ -156,10 +156,15 @@ Riêng lưới 2 ô vẫn dùng luồng chính (960 px) cho nét.
 ### Chế độ ngủ (tiết kiệm băng thông)
 
 - Mở web **không tự chạy camera nào**: chỉ khi bấm vào một cửa hàng thì lưới của cửa hàng đó mới mở luồng.
-- Không ai xem quá **2 phút** → phiên tự "ngủ": ffmpeg tắt, kết nối RTSP tới đầu ghi đóng, thư mục tạm xoá.
-  Thời gian ngủ đặt bằng biến môi trường `IDLE_SECS` (mặc định 120, code mặc định 90).
-- Khi mở cửa sổ xem một camera, các phiên lưới của cùng cửa hàng được nhả ngay (`/api/release`) để
-  nhường băng thông; khi đủ số phiên tối đa thì phiên **lâu không ai xem nhất** bị đuổi trước.
+- **Rời cửa hàng, đóng cửa sổ xem hoặc ẩn tab** → gọi `POST /api/sleep/{store}`, đóng **toàn bộ** phiên
+  của cửa hàng đó (lưới, HD, xem lại): ffmpeg tắt, kết nối RTSP tới đầu ghi đóng, thư mục tạm xoá.
+  Nhờ vậy camera không ai xem không chiếm CPU/băng thông, tài nguyên dồn cho cửa hàng đang xem.
+- Không ai gọi playlist quá **2 phút** → phiên tự ngủ theo `IDLE_SECS` (mặc định 120, code mặc định 90).
+  Phiên **xem lại** giữ lâu hơn (`PB_IDLE`, mặc định 240) vì người dùng hay dừng hình để xem kỹ.
+- Mở cửa sổ xem một camera → `POST /api/release/{store}?keep={ch}`: đóng phiên lưới **và** phiên HD của
+  kênh khác, chỉ giữ đúng kênh đang phóng to. Chuyển kênh trong cửa sổ xem cũng gọi lại lệnh này.
+- Chuyển sang xem lại bản ghi → cũng ngủ hoá phiên live của cửa hàng để đầu ghi chỉ phục vụ 1 phiên.
+- Khi đủ số phiên tối đa thì phiên **lâu không ai xem nhất** bị đuổi trước.
 - Thay bằng ffmpeg khác: đặt `FFMPEG=/usr/bin/ffmpeg` trong `environment` của `docker-compose.yml`.
 
 ### Tỉ lệ khung hình
@@ -241,7 +246,7 @@ Mỗi ô lưới là một phiên HLS riêng (`/hls/g4/...`, `g6`, `g10`…) do 
 (`subtype=1`) của đầu ghi — ô chỉ ~300 px nên không cần 1080p, đổi lại CPU server giảm ~4 lần
 và đầu ghi không bị nghẽn upload; lưới 2 ô dùng luồng chính. Đầu ghi nào không mở được luồng
 phụ thì server tự thử luồng chính rồi nhớ luồng còn sống cho lần sau.
-Tối đa 14 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt sau 2 phút (`IDLE_SECS`).
+Tối đa 14 phiên cùng lúc (`MAX_STREAMS`); rời cửa hàng/ẩn tab là phiên của cửa hàng đó đóng ngay (`POST /api/sleep/{store}`), phiên không ai xem tự tắt sau 2 phút (`IDLE_SECS`).
 
 ---
 

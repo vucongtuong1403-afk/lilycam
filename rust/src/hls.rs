@@ -16,6 +16,13 @@ fn idle_secs() -> u64 {
 }
 fn idle() -> Duration { Duration::from_secs(idle_secs()) }
 
+/// Phiên xem lại bản ghi sống lâu hơn phiên live: người dùng hay dừng hình để xem kỹ, và
+/// khi video đang pause thì hls.js không gọi playlist nên phiên trông như "không ai xem".
+fn idle_pb() -> Duration {
+    let s = std::env::var("PB_IDLE").ok().and_then(|v| v.parse().ok()).unwrap_or(240u64);
+    Duration::from_secs(s)
+}
+
 /// Sau khi ffmpeg của một kênh chết sớm (mất điện, sai mật khẩu, chặn cổng…), không mở
 /// lại kênh đó trong bao lâu (giây). Trước đây trình duyệt thử lại 3 lần × mỗi ô, mỗi lần
 /// spawn một ffmpeg mới rồi chết ngay → hàng trăm tiến trình/giờ, đốt CPU và GPU vô ích.
@@ -23,6 +30,7 @@ fn fail_backoff() -> Duration {
     let s = std::env::var("FAIL_BACKOFF").ok().and_then(|v| v.parse().ok()).unwrap_or(20u64);
     Duration::from_secs(s)
 }
+
 
 /// Phiên bị đuổi/đóng cách đây chưa quá bao lâu thì không mở lại (giây).
 const EVICT_COOLDOWN: Duration = Duration::from_secs(10);
@@ -440,10 +448,17 @@ impl Hls {
                 p.keys().cloned().collect()
             };
             let fresh = Duration::from_secs(8);
-            let pick = m.iter()
+            // Ưu tiên đuổi phiên của CƠ SỞ KHÁC: người dùng đang xem cửa hàng này thì
+            // phải giữ đủ lưới của cửa hàng này, chỉ lấy tài nguyên của cửa hàng khác.
+            let cur_store = format!("{}-", store.id);
+            let candidates: Vec<(&String, &Session)> = m.iter()
                 .filter(|(k, s)| !probing.contains(k) && now.duration_since(s.last) > fresh)
+                .collect();
+            let pick = candidates.iter()
+                .filter(|(k, _)| !k.starts_with(&cur_store))
                 .min_by_key(|(_, s)| s.last)
-                .map(|(k, _)| k.clone());
+                .or_else(|| candidates.iter().min_by_key(|(_, s)| s.last))
+                .map(|(k, _)| (*k).clone());
             match pick {
                 Some(victim) => {
                     if let Some(mut old) = m.remove(&victim) {
@@ -593,20 +608,71 @@ impl Hls {
         let _ = self.ensure(store, ch, "hd", &key).await;
     }
 
-    /// Đóng ngay các phiên lưới của một cơ sở để nhường kết nối cho cửa sổ xem.
-    pub fn release(&self, store_id: &str) {
-        let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+    /// Đóng các phiên của một cơ sở để nhường kết nối cho cửa sổ xem.
+    /// keep = Some(ch) thì giữ đúng phiên HD của kênh đang phóng to; HD của kênh khác
+    /// cũng bị đóng (trước đây chuyển kênh để lại mỗi kênh một ffmpeg HD sống 2 phút).
+    pub fn release(&self, store_id: &str, keep: Option<u32>) {
         let prefix = format!("{store_id}-");
-        let keys: Vec<String> = m.keys()
-            .filter(|k| k.starts_with(&prefix) && !k.ends_with("-hd"))
-            .cloned().collect();
-        for k in keys {
-            if let Some(mut s) = m.remove(&k) {
-                let _ = s.child.start_kill();
-                let _ = std::fs::remove_dir_all(&s.dir);
-                println!("[hls] đóng {k} (nhường chỗ cho cửa sổ xem)");
+        let keep_key = keep.map(|ch| format!("{store_id}-{ch}-hd"));
+        let mut n = 0usize;
+        {
+            let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let keys: Vec<String> = m.keys()
+                .filter(|k| k.starts_with(&prefix))
+                .filter(|k| match (&keep_key, k.ends_with("-hd")) {
+                    (Some(kk), true) => *k != kk,
+                    (Some(_), false) => true,
+                    (None, _) => true,
+                })
+                .cloned().collect();
+            for k in keys {
+                if let Some(mut s) = m.remove(&k) {
+                    let _ = s.child.start_kill();
+                    let _ = std::fs::remove_dir_all(&s.dir);
+                    n += 1;
+                }
             }
         }
+        n += self.kill_pb_prefix(&prefix, "nhường chỗ cho cửa sổ xem");
+        if n > 0 { println!("[hls] đóng {n} phiên của {store_id} (nhường chỗ cho cửa sổ xem)"); }
+    }
+
+    /// Đóng mọi phiên xem lại có khoá bắt đầu bằng prefix.
+    fn kill_pb_prefix(&self, prefix: &str, why: &str) -> usize {
+        let mut n = 0usize;
+        if let Ok(mut pb) = self.pb.lock() {
+            let keys: Vec<String> = pb.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+            for k in keys {
+                if let Some(mut s) = pb.remove(&k) {
+                    let _ = s.helper.start_kill();
+                    let _ = s.ff.start_kill();
+                    let _ = std::fs::remove_dir_all(&s.dir);
+                    println!("[netsdk] đóng {k} ({why})");
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// Cho một cơ sở "ngủ": đóng TOÀN BỘ phiên của nó (lưới, HD, xem lại) để trả CPU,
+    /// băng thông và kết nối về đầu ghi. Gọi khi người dùng rời cơ sở hoặc ẩn tab.
+    pub fn sleep_store(&self, store_id: &str) {
+        let prefix = format!("{store_id}-");
+        let mut n = 0usize;
+        {
+            let mut m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let keys: Vec<String> = m.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+            for k in keys {
+                if let Some(mut s) = m.remove(&k) {
+                    let _ = s.child.start_kill();
+                    let _ = std::fs::remove_dir_all(&s.dir);
+                    n += 1;
+                }
+            }
+        }
+        n += self.kill_pb_prefix(&prefix, "cơ sở đi ngủ");
+        if n > 0 { println!("[hls] {store_id} ngủ: đóng {n} phiên"); }
     }
 
     /// Tắt server: đóng hết ffmpeg (tránh tiến trình mồ côi giữ kết nối đầu ghi).
@@ -670,7 +736,7 @@ impl Hls {
     /// Đóng các phiên không ai xem quá thời gian chờ.
     pub fn sweep(&self) {
         if let Ok(mut pb) = self.pb.lock() {
-            let dead: Vec<String> = pb.iter().filter(|(_, s)| s.last.elapsed() > idle()).map(|(k, _)| k.clone()).collect();
+            let dead: Vec<String> = pb.iter().filter(|(_, s)| s.last.elapsed() > idle_pb()).map(|(k, _)| k.clone()).collect();
             for k in dead {
                 if let Some(mut s) = pb.remove(&k) {
                     let _ = std::fs::remove_dir_all(&s.dir);

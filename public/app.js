@@ -646,6 +646,13 @@ function applySound() {
 }
 
 function toggleSound() {
+  // Khi xem lại bản ghi, tiếng nằm ngay trong phiên playback (không phụ thuộc chất lượng
+  // luồng trực tiếp) nên chỉ bật/tắt tiếng, không dựng lại cửa sổ xem.
+  if (state.playback) {
+    state.soundOn = !state.soundOn;
+    applySound();
+    return;
+  }
   if (state.quality !== 'hd') {
     setQuality('hd');
     state.soundOn = true;
@@ -979,7 +986,13 @@ function startPlayback(s, ch) {
     msg.textContent = 'Trình duyệt không hỗ trợ phát lại.';
   }
 
-  video.onplaying = () => { msg.hidden = true; clearTimeout(hdTimer); };
+  video.onplaying = () => {
+    msg.hidden = true;
+    clearTimeout(hdTimer);
+    // bản ghi có tiếng hay không là do đầu ghi quyết định: kiểm tra lại để nút loa
+    // bật được (và báo đúng "không có âm thanh" nếu đoạn ghi câm).
+    setTimeout(checkAudio, 2500);
+  };
 }
 
 function openPlaybackDialog() {

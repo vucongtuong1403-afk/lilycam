@@ -87,8 +87,14 @@ pub async fn start(
     // Playlist kiểu EVENT: giữ toàn bộ segment của cửa sổ và KHÔNG đóng danh sách, nên
     // trình phát coi đây là bản ghi đang dài thêm, phát tuần tự từ đầu thay vì đuổi mép
     // live. Nhờ vậy tốc độ 0.5–4× và tua lùi trong vùng đã tải đều chạy đúng.
+    // Bản ghi Dahua có tiếng (khối 0xf0, G.711 A-law 8 kHz mono): giữ lại để nút loa
+    // hoạt động khi xem lại. `0:a:0?` chịu được đầu ghi không ghi âm.
+    enc.extend(["-map".into(), "0:v:0".into(), "-map".into(), "0:a:0?".into(),
+        "-c:a".into(), "aac".into(), "-b:a".into(), "64k".into(),
+        "-ar".into(), "44100".into(), "-ac".into(), "1".into(),
+        "-af".into(), "volume=8dB".into()]);
     enc.extend(["-g".into(), "50".into(), "-force_key_frames".into(), "expr:gte(t,n_forced*2)".into(),
-        "-an".into(), "-f".into(), "hls".into(),
+        "-f".into(), "hls".into(),
         "-hls_time".into(), "2".into(), "-hls_playlist_type".into(), "event".into(),
         "-hls_flags".into(), "independent_segments".into(),
         "-hls_segment_filename".into(), dir.join("seg%04d.ts").to_string_lossy().to_string(),

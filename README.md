@@ -99,7 +99,11 @@ Băng thông mỗi ô lưới (đã thu nhỏ sẵn ở server):
   gần nhất và báo. Nút **‹ ›** đổi ngày, **Chọn giờ** để nhập chính xác, **Về live** trở lại.
   Dữ liệu đoạn ghi lấy qua NetSDK (`CLIENT_QueryRecordFile`), cache 5 phút.
 - Điều khiển: **⏸ tạm dừng / phát tiếp** (hoặc phím **Space**), **tốc độ 0.5× / 1× / 1.5× / 2× / 4×**,
-  **✂ Cắt clip** để tải đoạn đang chọn về máy dạng MP4 1080p.
+    **✂ Cắt clip** để tải đoạn đang chọn về máy dạng MP4 1080p.
+- **Tiếng khi xem lại**: nút loa bật/tắt tiếng của chính đoạn ghi. Bản ghi Dahua chứa khối âm
+  thanh riêng (`0xf0`, G.711 A-law 8 kHz mono); server chuyển sang AAC 64 kbps mono rồi ghép vào
+  segment HLS, nên không cần thêm kết nối nào tới đầu ghi. Đầu ghi **không ghi âm** (nhiều cơ sở
+  tắt micro) thì nút loa tự chuyển sang trạng thái mờ với chú thích "Camera này không có âm thanh".
 - Kỹ thuật: `bin/dahua-pb` mở phiên NetSDK tới đầu ghi và đẩy **nguyên khối DHAV** ra ống;
   ffmpeg đọc bằng demuxer `dhav` (tự bóc header 44 byte, tự đồng bộ lại sau mỗi khối) rồi
   đóng gói HLS 2 giây/segment. Không bóc header bằng tay, không dùng `-ss` (demuxer dhav bỏ qua).

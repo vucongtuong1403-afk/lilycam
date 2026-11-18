@@ -5,7 +5,15 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::path::Path;
 
-pub struct UserRec { pub username: String, pub salt: String, pub hash: String }
+/// Phạm vi được xem của một tài khoản (trường "allowed" trong data/users.json).
+/// Không có trường này = xem tất cả (như admin).
+#[derive(Clone, Debug, Default)]
+pub struct Allowed {
+    pub stores: Vec<String>,
+    pub channels: std::collections::HashMap<String, Vec<u32>>,
+}
+
+pub struct UserRec { pub username: String, pub salt: String, pub hash: String, pub allowed: Option<Allowed> }
 
 pub struct Users { pub list: Vec<UserRec> }
 
@@ -17,6 +25,7 @@ impl Users {
                 username: u.get("username")?.as_str()?.to_string(),
                 salt: u.get("salt")?.as_str()?.to_string(),
                 hash: u.get("hash")?.as_str()?.to_string(),
+                allowed: parse_allowed(u.get("allowed")),
             })
         }).collect()).unwrap_or_default();
         Users { list }
@@ -32,6 +41,21 @@ impl Users {
             known.len() == out.len() && constant_time_eq(&known, &out)
         }).unwrap_or(false)
     }
+}
+
+fn parse_allowed(v: Option<&Value>) -> Option<Allowed> {
+    let a = v?;
+    let stores = a.get("stores").and_then(|x| x.as_array())
+        .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let mut channels = std::collections::HashMap::new();
+    if let Some(map) = a.get("channels").and_then(|x| x.as_object()) {
+        for (store, list) in map {
+            let chans: Vec<u32> = list.as_array().map(|arr| arr.iter().filter_map(|n| n.as_u64()).map(|n| n as u32).collect()).unwrap_or_default();
+            channels.insert(store.clone(), chans);
+        }
+    }
+    Some(Allowed { stores, channels })
 }
 
 fn hex_decode(s: &str) -> Vec<u8> {

@@ -249,12 +249,14 @@ Tối đa 14 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt 
 
 | Hạng mục | Cách làm |
 |---|---|
-| Đăng nhập | 1 tài khoản `admin`, mật khẩu hash **scrypt** (N=16384), so sánh timing-safe |
+| Đăng nhập | Mật khẩu hash **scrypt** (N=16384), so sánh timing-safe |
+| Phân quyền | `data/users.json`: tài khoản có trường `allowed` chỉ thấy cơ sở / kênh trong danh sách; không có trường này thì thấy tất cả |
 | Phiên | Cookie `HttpOnly; SameSite=Lax`, ký **HMAC-SHA256**, hết hạn sau 12 giờ |
 | Chống dò | 10 lần / 10 phút mỗi IP, 8 lần / 10 phút mỗi tài khoản + delay 350 ms |
 | Header | CSP chặt (kể cả `worker-src blob:` cho hls.js), `X-Frame-Options: DENY`, `nosniff` |
 | Dữ liệu | Mật khẩu camera chỉ ở `data/cameras.json` (quyền 600) trên máy chủ |
-| API | Mọi endpoint (trừ `/api/login`, `/api/health`) đều cần phiên hợp lệ |
+| API | Mọi endpoint camera (ảnh, HLS, PTZ, xem lại, chụp, cấu hình) đều cần phiên hợp lệ; chỉ `/api/login`, `/api/logout`, `/api/health`, `/api/capture/status` để mở |
+| Cơ sở mất kết nối | Vòng quét nền 15 phút đánh dấu, chặn mở phiên trong 3 phút để không đốt CPU; nút **Thử lại** mở chặn ngay |
 
 **Nên làm thêm:**
 
@@ -342,9 +344,15 @@ trong `docker-compose.yml`, hoặc đổi thiết bị bằng `VAAPI_DEV`.
 | | CPU cả container | Nhiệt độ CPU |
 |---|---|---|
 | libx264 (không GPU) | **~35 %** (24–68 %) | 52–53 °C |
-| libx264, 6 ô lưới cùng một cơ sở | 141 % (đo 2026-11-18) | 55 °C |
+| libx264, 6 ô lưới cùng một cơ sở, preset `ultrafast` crf 27–29 (hiện tại) | **~70 %** (~12 %/ô) | 47 °C |
+| libx264, 6 ô lưới cùng một cơ sở, preset `veryfast` crf 24 | 141 % (đo 2026-11-18) | 55 °C |
 | libx264 khi lưới lấy luồng chính (trước đây) | 151–371 % | 57–92 °C |
 | VAAPI | **23–45 %** | **38–56 °C** |
+
+Ghi chú: ô lưới (4 ô trở lên) mã hoá bằng `ultrafast` + `crf 27–29` + `bicubic`, đo được
+giảm ~49 % CPU so với `veryfast` + `crf 24` + `lanczos`; file segment to hơn ~13 % nhưng ở
+cỡ ô 300–450 px thì không phân biệt được bằng mắt. Ô phóng to (`hd`) và lưới 2 ô vẫn dùng
+`veryfast` + `crf 21–22` để giữ nét.
 
 Ghi chú: máy này hiện **không có VAAPI** (`/dev/dri/renderD128` là card NVIDIA GT 720,
 trong khi iGPU Intel bị tắt trong BIOS). Bảng trên đo ở chế độ libx264 để so sánh.

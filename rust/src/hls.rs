@@ -26,6 +26,8 @@ fn fail_backoff() -> Duration {
 
 /// Phiên bị đuổi/đóng cách đây chưa quá bao lâu thì không mở lại (giây).
 const EVICT_COOLDOWN: Duration = Duration::from_secs(10);
+/// Cơ sở đã bị vòng quét nền xác định mất kết nối thì không mở phiên trong chừng này giây.
+const OFFLINE_BACKOFF: Duration = Duration::from_secs(180);
 
 /// Lần cuối in cảnh báo "đủ phiên" (mili giây UNIX) — để không spam log mỗi request.
 static LAST_FULL_LOG: AtomicU64 = AtomicU64::new(0);
@@ -39,6 +41,11 @@ struct Profile {
     /// Lấy luồng phụ (subtype=1) thay vì luồng chính: ô lưới nhỏ nên độ nét không
     /// khác biệt, nhưng giải mã 352x288 rẻ hơn 960x1080 khoảng 14 lần.
     sub: bool,
+    /// Ô lưới dùng bộ mã hoá rẻ: ultrafast + crf cao + scale bicubic. Đo trên 319 Lê Lợi
+    /// (cửa sổ 20 s, luồng phụ): veryfast/crf24/lanczos 78 s CPU, ultrafast/crf28/bicubic
+    /// 40 s CPU — giảm 49 % trong khi file chỉ to hơn 13 % và mắt thường không phân biệt
+    /// được ở cỡ ô 300–450 px. Giữ veryfast cho hd và g2 (2 ô to, cần nét).
+    fast: bool,
 }
 
 /// Thiết bị VAAPI để giải mã + mã hoá bằng GPU Intel. `VAAPI=0` để tắt hẳn.
@@ -73,14 +80,14 @@ fn profile_of(name: &str) -> Option<Profile> {
         // vẫn dùng luồng chính cho nét.
         // Đầu ghi khai báo 100 fps trong RTSP (thực tế 25) → ép 25 fps, nếu không ffmpeg
         // nhân bản khung hình, tốn CPU mà hình vẫn 25 fps.
-        "hd" => Profile { width: 0, fps: 25, rate: 4500, crf: 21, threads: 2, sub: false },
-        "g2" => Profile { width: 960, fps: 20, rate: 3000, crf: 22, threads: 2, sub: false },
+        "hd" => Profile { width: 0, fps: 25, rate: 4500, crf: 21, threads: 2, sub: false, fast: false },
+        "g2" => Profile { width: 960, fps: 20, rate: 3000, crf: 22, threads: 2, sub: false, fast: false },
         // Luồng phụ Dahua thường 352x288 @ 7 fps nhưng có đầu ghi để 640x360 hay 704x576,
         // nên fps đặt 8–12 chứ không ép xuống 7: rẻ hơn nữa không đáng mà hình giật.
-        "g4" => Profile { width: 640, fps: 12, rate: 1200, crf: 24, threads: 2, sub: true },
-        "g6" => Profile { width: 560, fps: 10, rate: 900, crf: 24, threads: 2, sub: true },
-        "g8" => Profile { width: 448, fps: 10, rate: 900, crf: 24, threads: 1, sub: true },
-        "g10" => Profile { width: 352, fps: 8, rate: 700, crf: 25, threads: 1, sub: true },
+        "g4" => Profile { width: 640, fps: 12, rate: 1200, crf: 27, threads: 2, sub: true, fast: true },
+        "g6" => Profile { width: 560, fps: 10, rate: 900, crf: 28, threads: 2, sub: true, fast: true },
+        "g8" => Profile { width: 448, fps: 10, rate: 900, crf: 28, threads: 1, sub: true, fast: true },
+        "g10" => Profile { width: 352, fps: 8, rate: 700, crf: 29, threads: 1, sub: true, fast: true },
         _ => return None,
     })
 }
@@ -128,6 +135,10 @@ pub struct Hls {
     /// Kênh có luồng chính "h264, none" (ffmpeg không đọc được thông số trong 5 MB đầu) thì
     /// nhớ để mở lại với probesize/analyzeduration lớn hơn.
     deep: Mutex<HashMap<String, Instant>>,
+    /// Cơ sở mà vòng quét nền đã xác định mất kết nối: chặn hẳn việc mở phiên trong
+    /// OFFLINE_BACKOFF giây. Trước đây 6 ô lưới của một cơ sở mất điện vẫn mở ffmpeg
+    /// liên tục (51 lần/15 phút với 25 Xuân La) — vừa tốn CPU vừa đầy log.
+    offline: Mutex<HashMap<String, Instant>>,
 }
 
 /// Tạo (hoặc dùng lại) thư mục ghi được dưới base; không ghi được thì thử tên khác.
@@ -190,7 +201,7 @@ impl Hls {
         };
         Hls { max, ffmpeg, helper, sdk_lib, base: dir, sessions: Mutex::new(HashMap::new()), pb: Mutex::new(HashMap::new()), enabled, vaapi, http_mode: Mutex::new(HashMap::new()),
             probing: Mutex::new(HashMap::new()), fail_until: Mutex::new(HashMap::new()), evict_at: Mutex::new(HashMap::new()),
-            sub: Mutex::new(HashMap::new()), deep: Mutex::new(HashMap::new()) }
+            sub: Mutex::new(HashMap::new()), deep: Mutex::new(HashMap::new()), offline: Mutex::new(HashMap::new()) }
     }
 
     /// Phát lại bản ghi qua NetSDK (hồ sơ pbNNN).
@@ -243,6 +254,25 @@ impl Hls {
 
     pub fn enabled(&self) -> bool { self.enabled }
 
+    /// Đánh dấu cơ sở mất kết nối (theo vòng quét nền) — chặn mở phiên trong ít phút.
+    pub fn block_store(&self, id: &str) {
+        let until = Instant::now() + OFFLINE_BACKOFF;
+        self.offline.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), until);
+    }
+
+    /// Cơ sở đang trong thời gian chặn vì mất kết nối?
+    pub fn store_blocked(&self, id: &str) -> bool {
+        let now = Instant::now();
+        let mut m = self.offline.lock().unwrap_or_else(|e| e.into_inner());
+        m.retain(|_, t| *t > now);
+        m.contains_key(id)
+    }
+
+    /// Bỏ chặn ngay (khi người dùng bấm thử lại hoặc vòng quét thấy cơ sở đã sống).
+    pub fn unblock_store(&self, id: &str) {
+        self.offline.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+    }
+
     pub fn stats(&self) -> Value {
         let m = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let by: Vec<String> = m.values().map(|s| s.profile.clone()).collect();
@@ -252,6 +282,7 @@ impl Hls {
 
     /// Trả nội dung file trong phiên (tự mở phiên nếu chưa có, chờ tới khi có segment đầu).
     pub async fn playlist_file(&self, store: &Store, ch: u32, profile: &str, file: &str) -> Option<Vec<u8>> {
+        if self.store_blocked(&store.id) { return None; }
         self.sweep();
         if profile.starts_with("pb") { return self.playlist_pb(store, ch, profile, file).await; }
         let key = format!("{}-{}-{}", store.id, ch, profile);
@@ -492,11 +523,14 @@ impl Hls {
                 "-bufsize".into(), format!("{}k", p.rate * 2),
                 "-profile:v".into(), "main".into()]);
         } else {
-            args.extend(["-c:v".into(), "libx264".into(), "-preset".into(), "veryfast".into(),
+            // fast (ô lưới): ultrafast + không B-frame + tắt aq-mode. veryfast/bf2/aq-mode2
+            // đẹp hơn nhưng tốn gấp đôi CPU; ở cỡ ô lưới mắt thường không phân biệt.
+            let (preset, bf) = if p.fast { ("ultrafast", "0") } else { ("veryfast", "2") };
+            args.extend(["-c:v".into(), "libx264".into(), "-preset".into(), preset.into(),
                 "-threads".into(), p.threads.to_string(), "-crf".into(), p.crf.to_string(),
                 "-maxrate".into(), format!("{}k", p.rate), "-bufsize".into(), format!("{}k", p.rate * 2),
-                "-profile:v".into(), "main".into(), "-bf".into(), "2".into(),
-                "-x264-params".into(), "aq-mode=2".into(),
+                "-profile:v".into(), "main".into(), "-bf".into(), bf.into(),
+                "-x264-params".into(), if p.fast { "aq-mode=0".into() } else { "aq-mode=2".into() },
                 "-pix_fmt".into(), "yuv420p".into()]);
         }
         if profile == "hd" {
@@ -518,7 +552,8 @@ impl Hls {
             }
         } else if p.width > 0 {
             // không phóng to: luồng phụ chỉ 352x288, scale lên chỉ tốn CPU mà hình vẫn vỡ
-            args.extend(["-vf".into(), format!("scale='min(iw,{})':-2:flags=lanczos,fps={}", p.width, p.fps)]);
+            let scaler = if p.fast { "bicubic" } else { "lanczos" };
+            args.extend(["-vf".into(), format!("scale='min(iw,{})':-2:flags={},fps={}", p.width, scaler, p.fps)]);
         } else if p.fps > 0 {
             args.extend(["-vf".into(), format!("fps={}", p.fps)]);
         }

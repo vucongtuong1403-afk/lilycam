@@ -262,6 +262,11 @@ async fn main() {
 
 /* ------------------------------- tiện ích ------------------------------- */
 
+/// Bắt buộc đăng nhập cho route đọc dữ liệu camera.
+fn need_user(app: &App, headers: &HeaderMap) -> Result<String, Response> {
+    app.user_of(headers).ok_or_else(|| err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập"))
+}
+
 fn json_res(code: StatusCode, v: Value) -> Response {
     (code, [(header::CONTENT_TYPE, "application/json; charset=utf-8")], v.to_string()).into_response()
 }
@@ -296,6 +301,27 @@ impl App {
         match &store.allowed_users {
             None => true,
             Some(list) => list.iter().any(|u| u == user),
+        }
+    }
+    /// Phạm vi của tài khoản (trường "allowed" trong data/users.json). None = xem tất cả.
+    fn scope_of(&self, user: &str) -> Option<auth::Allowed> {
+        self.users.list.iter()
+            .find(|u| u.username.eq_ignore_ascii_case(user))
+            .and_then(|u| u.allowed.clone())
+    }
+    /// Tài khoản có được xem cơ sở (và kênh, nếu có) này không.
+    fn can_view(&self, user: &str, store_id: &str, ch: Option<u32>) -> bool {
+        if let Some(s) = self.store(store_id) {
+            if !self.is_allowed(user, &s) { return false; }
+        }
+        let sc = match self.scope_of(user) { Some(sc) => sc, None => return true };
+        if !sc.stores.iter().any(|s| s == store_id) { return false; }
+        match ch {
+            None => true,
+            Some(ch) => match sc.channels.get(store_id) {
+                None => true,
+                Some(list) => list.contains(&ch),
+            },
         }
     }
 }
@@ -360,12 +386,25 @@ async fn api_session(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
 async fn api_stores(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let user = match app.user_of(&headers) { Some(u) => u, None => return err_res(StatusCode::UNAUTHORIZED, "Chưa đăng nhập") };
     let merged: Vec<Store> = app.stores.iter().filter_map(|s| app.store(&s.id)).collect();
-    let list: Vec<Value> = merged.iter().filter(|s| app.is_allowed(&user, s)).map(|s| {
+    // Kết quả vòng quét nền (spawn_health) — trước đây luôn trả null nên sidebar hiện
+    // "Chưa kiểm tra" mãi; nay trả trạng thái thật kèm thời điểm đo.
+    let health = app.cam_health.lock().map(|m| m.clone()).unwrap_or(Value::Null);
+    let updated = health.get("updatedAt").cloned().unwrap_or(Value::Null);
+    let empty = Vec::new();
+    let rows = health.get("stores").and_then(|x| x.as_array()).unwrap_or(&empty);
+    let list: Vec<Value> = merged.iter().filter(|s| app.can_view(&user, &s.id, None)).map(|s| {
+        let h = rows.iter().find(|r| r.get("id").and_then(|x| x.as_str()) == Some(s.id.as_str()));
+        let online = match h.and_then(|r| r.get("ok")).and_then(|x| x.as_bool()) {
+            Some(ok) => Value::Bool(ok),
+            None => Value::Null,
+        };
         json!({
             "id": s.id, "name": s.name, "unit": s.unit,
             "cameras": s.channels.as_ref().map(|c| c.len() as u32).unwrap_or(s.cameras),
             "channels": s.channels, "plan": s.plan, "verified": s.verified,
-            "note": s.note, "online": Value::Null, "lastCheck": Value::Null, "error": Value::Null,
+            "note": s.note, "online": online,
+            "lastCheck": if online.is_null() { Value::Null } else { updated.clone() },
+            "error": Value::Null,
         })
     }).collect();
     json_res(StatusCode::OK, json!({
@@ -398,10 +437,10 @@ async fn api_stats(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
     }))
 }
 
-async fn api_snap(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>, Query(q): Query<HashMap<String, String>>) -> Response {
-    let user = match app.user_of(&{ HeaderMap::new() }) { Some(u) => u, None => String::new() };
-    let _ = user;
+async fn api_snap(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     let fast = q.get("fast").map(|v| v == "1").unwrap_or(false);
     if fast {
         match app.snap.last_frame(&store.id, ch) {
@@ -427,8 +466,10 @@ fn jpeg_response(buf: Vec<u8>) -> Response {
     ).into_response()
 }
 
-async fn api_meta(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>) -> Response {
+async fn api_meta(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     match app.snap.get(&store, ch).await {
         Ok(buf) => match jpeg::size(&buf) {
             Some((w, h)) => json_res(StatusCode::OK, json!({ "w": w, "h": h })),
@@ -438,8 +479,10 @@ async fn api_meta(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32
     }
 }
 
-async fn api_stream(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>) -> Response {
+async fn api_stream(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     match app.dahua_mjpeg(&store, ch).await {
         Ok(resp) => {
             let ct = resp.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
@@ -455,8 +498,10 @@ async fn api_stream(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u
     }
 }
 
-async fn api_hls(State(app): State<Arc<App>>, Path((profile, id, ch, file)): Path<(String, String, u32, String)>) -> Response {
+async fn api_hls(State(app): State<Arc<App>>, headers: HeaderMap, Path((profile, id, ch, file)): Path<(String, String, u32, String)>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     if !file.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
         return err_res(StatusCode::BAD_REQUEST, "Tên tệp không hợp lệ");
     }
@@ -474,8 +519,10 @@ async fn api_hls(State(app): State<Arc<App>>, Path((profile, id, ch, file)): Pat
     }
 }
 
-async fn api_ptz(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>, body: String) -> Response {
+async fn api_ptz(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>, body: String) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền điều khiển camera này"); }
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
     let code = v.get("code").and_then(|x| x.as_str()).unwrap_or("");
     let action = v.get("action").and_then(|x| x.as_str()).unwrap_or("start");
@@ -487,7 +534,8 @@ async fn api_ptz(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)
 }
 
 /// Cập nhật thông tin kết nối của một cơ sở — ghi cameras.json + RAM.
-async fn api_store_put(State(app): State<Arc<App>>, Path(id): Path<String>, body: String) -> Response {
+async fn api_store_put(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>, body: String) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     let mut s = match app.store(&id) { Some(s) => s, None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     if let Some(h) = v.get("host").and_then(|x| x.as_str()) { s.host = h.trim().to_string(); }
@@ -514,28 +562,38 @@ async fn api_store_put(State(app): State<Arc<App>>, Path(id): Path<String>, body
     json_res(StatusCode::OK, json!({ "ok": true }))
 }
 
-async fn api_warm(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>) -> Response {
+async fn api_warm(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let s = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &s.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     app.hls.warm(&s, ch).await;
     json_res(StatusCode::OK, json!({ "ok": true }))
 }
 
-async fn api_release(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+async fn api_release(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     if app.store(&id).is_none() { return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này"); }
     app.hls.release(&id);
     json_res(StatusCode::OK, json!({ "ok": true }))
 }
 
-async fn api_probe(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+async fn api_probe(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     let s = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
     let t0 = std::time::Instant::now();
     match dahua::snapshot(&s, 1).await {
-        Ok(_) => json_res(StatusCode::OK, json!({ "ok": true, "ms": t0.elapsed().as_millis() as u64 })),
+        Ok(_) => {
+            // Người dùng bấm "Thử lại" thành công thì mở cổng cho các phiên xem ngay,
+            // không phải chờ vòng quét nền 15 phút.
+            app.hls.unblock_store(&s.id);
+            json_res(StatusCode::OK, json!({ "ok": true, "ms": t0.elapsed().as_millis() as u64 }))
+        }
         Err(e) => json_res(StatusCode::OK, json!({ "ok": false, "ms": t0.elapsed().as_millis() as u64, "error": e })),
     }
 }
 
-async fn api_dvr(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+async fn api_dvr(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     let s = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
     if s.host.is_empty() { return err_res(StatusCode::NOT_FOUND, "Cơ sở chưa có địa chỉ"); }
     (
@@ -545,21 +603,25 @@ async fn api_dvr(State(app): State<Arc<App>>, Path(id): Path<String>) -> Respons
     ).into_response()
 }
 
-async fn api_storecfg(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+async fn api_storecfg(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     let s = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
     json_res(StatusCode::OK, json!({ "host": s.host, "port": s.port, "user": s.user, "pass": s.pass, "cameras": s.cameras }))
 }
 
 /// Kiểm tra nhanh đầu ghi có mở được RTSP playback (/cam/playback) không.
-async fn api_pbcheck(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+async fn api_pbcheck(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     let s = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
     let supported = hls::rtsp_playback_supported(&app.ffmpeg, &s).await;
     json_res(StatusCode::OK, json!({ "supported": supported, "engine": if supported { "rtsp" } else { "netsdk" } }))
 }
 
 /// Danh sách đoạn có bản ghi trong 1 ngày (qua helper NetSDK bin/dahua-pb).
-async fn api_records(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn api_records(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
+    if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     let day = q.get("date").cloned().unwrap_or_default();
     let parts: Vec<i64> = day.split('-').filter_map(|p| p.parse::<i64>().ok()).collect();
     if day.len() != 10 || parts.len() != 3 {
@@ -621,11 +683,15 @@ impl App {
     }
 }
 
-async fn api_zone_get(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>) -> Response {
+async fn api_zone_get(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
+    if !app.can_view(&user, &id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
     json_res(StatusCode::OK, app.zones.get(&id, ch))
 }
 
-async fn api_zone_put(State(app): State<Arc<App>>, Path((id, ch)): Path<(String, u32)>, body: String) -> Response {
+async fn api_zone_put(State(app): State<Arc<App>>, headers: HeaderMap, Path((id, ch)): Path<(String, u32)>, body: String) -> Response {
+    let user = match need_user(&app, &headers) { Ok(u) => u, Err(r) => return r };
+    if !app.can_view(&user, &id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền sửa vùng này"); }
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
     let z = app.zones.put(&app.zones_path, &id, ch, &v);
     json_res(StatusCode::OK, z)
@@ -642,11 +708,13 @@ async fn api_capture_status(State(app): State<Arc<App>>) -> Response {
 
 fn chrono_like_now() -> lark::Dt { lark::Dt::now() }
 
-async fn api_capture_options(State(app): State<Arc<App>>) -> Response {
+async fn api_capture_options(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     json_res(StatusCode::OK, app.lark.options().await)
 }
 
-async fn api_capture(State(app): State<Arc<App>>, body: String) -> Response {
+async fn api_capture(State(app): State<Arc<App>>, headers: HeaderMap, body: String) -> Response {
+    if let Err(r) = need_user(&app, &headers) { return r; }
     json_res(StatusCode::OK, app.lark.capture(&app, &body).await)
 }
 
@@ -711,6 +779,10 @@ async fn api_clip(State(app): State<Arc<App>>, headers: HeaderMap, Query(q): Que
     let id = q.get("store").cloned().unwrap_or_default();
     let store = match app.store(&id) { Some(s) => s.clone(), None => return err_res(StatusCode::NOT_FOUND, "Không có cơ sở này") };
     let ch: u32 = q.get("ch").and_then(|v| v.parse().ok()).unwrap_or(1);
+    {
+        let user = app.user_of(&headers).unwrap_or_default();
+        if !app.can_view(&user, &store.id, Some(ch)) { return err_res(StatusCode::FORBIDDEN, "Không có quyền xem camera này"); }
+    }
     let from: i64 = q.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
     let to: i64 = q.get("to").and_then(|v| v.parse().ok()).unwrap_or(0);
     if from <= 0 || to <= from {
@@ -778,6 +850,7 @@ fn spawn_health(app: Arc<App>) {
                 let mut handles = Vec::new();
                 for s in chunk {
                     let ff = app.ffmpeg.clone();
+                    let app_hls = app.hls.clone();
                     let st = s.clone();
                     handles.push(tokio::spawn(async move {
                         // thử kênh đầu; nếu chết thử thêm 2 kênh kế (kênh 1 có thể bị tắt)
@@ -788,6 +861,9 @@ fn spawn_health(app: Arc<App>) {
                         for cand in list.iter().take(4) {
                             if probe_rtsp(&ff, &st, *cand).await { ch = *cand; ok = true; break; }
                         }
+                        // Cơ sở mất điện/mạng: chặn hẳn mở phiên cho tới vòng quét sau.
+                        // Trước đây 6 ô lưới của 25 Xuân La vẫn spawn ffmpeg 51 lần/15 phút.
+                        if ok { app_hls.unblock_store(&st.id); } else { app_hls.block_store(&st.id); }
                         json!({ "id": st.id, "name": st.name, "ch": ch, "ok": ok,
                             "at": crate::auth::now_ms() })
                     }));

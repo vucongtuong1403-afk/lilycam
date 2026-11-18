@@ -59,9 +59,16 @@ sudo systemctl daemon-reload && sudo systemctl restart camera-web
 | RAM tiến trình | ~60 MB | **~5 MB** |
 | 8 endpoint (`rust/smoke.sh`) | 200 | **200 — tất cả khớp** |
 
+Bảng trên là kết quả đối chiếu lúc còn chạy song song hai bản. Bản Node đã được xoá nên
+`rust/smoke.sh` nay chỉ tự kiểm tra một bản đang chạy: route công khai trả 200, route camera
+phải 401 khi chưa đăng nhập, và 200 sau khi đăng nhập.
+
+```bash
+SMOKE_USER=admin SMOKE_PASS=... bash rust/smoke.sh
+```
+
 > Lưu ý khi viết script so sánh: môi trường có biến `NODE` trỏ tới binary node
-> (`/home/…/bin/node`), nên đừng đặt tên biến URL là `NODE`/`RUST` — dùng `NODE_URL`/`RUST_URL`
-> (đã sửa trong `rust/smoke.sh`).
+> (`/home/…/bin/node`), nên đừng đặt tên biến URL là `NODE`/`RUST` — dùng `NODE_URL`/`RUST_URL`.
 
 ## Quy ước từ nay
 

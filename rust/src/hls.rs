@@ -30,7 +30,16 @@ const EVICT_COOLDOWN: Duration = Duration::from_secs(10);
 /// Lần cuối in cảnh báo "đủ phiên" (mili giây UNIX) — để không spam log mỗi request.
 static LAST_FULL_LOG: AtomicU64 = AtomicU64::new(0);
 
-struct Profile { width: u32, fps: u32, rate: u32, crf: u32, threads: u32 }
+struct Profile {
+    width: u32,
+    fps: u32,
+    rate: u32,
+    crf: u32,
+    threads: u32,
+    /// Lấy luồng phụ (subtype=1) thay vì luồng chính: ô lưới nhỏ nên độ nét không
+    /// khác biệt, nhưng giải mã 352x288 rẻ hơn 960x1080 khoảng 14 lần.
+    sub: bool,
+}
 
 /// Thiết bị VAAPI để giải mã + mã hoá bằng GPU Intel. `VAAPI=0` để tắt hẳn.
 fn vaapi_device() -> Option<PathBuf> {
@@ -59,12 +68,19 @@ fn vaapi_works(ffmpeg: &std::path::Path, dev: &std::path::Path) -> bool {
 
 fn profile_of(name: &str) -> Option<Profile> {
     Some(match name {
-        "hd" => Profile { width: 0, fps: 0, rate: 4500, crf: 21, threads: 4 },
-        "g2" => Profile { width: 960, fps: 20, rate: 3000, crf: 22, threads: 2 },
-        "g4" => Profile { width: 720, fps: 20, rate: 2500, crf: 23, threads: 2 },
-        "g6" => Profile { width: 640, fps: 15, rate: 1800, crf: 24, threads: 2 },
-        "g8" => Profile { width: 640, fps: 15, rate: 1800, crf: 24, threads: 1 },
-        "g10" => Profile { width: 560, fps: 12, rate: 1400, crf: 25, threads: 1 },
+        // Lưới (g2–g10) lấy luồng phụ 352x288 của đầu ghi: giải mã rẻ hơn luồng chính
+        // ~14 lần nên 6 ô chỉ tốn vài chục % CPU thay vì hơn 300 %. Riêng g2 (2 ô to)
+        // vẫn dùng luồng chính cho nét.
+        // Đầu ghi khai báo 100 fps trong RTSP (thực tế 25) → ép 25 fps, nếu không ffmpeg
+        // nhân bản khung hình, tốn CPU mà hình vẫn 25 fps.
+        "hd" => Profile { width: 0, fps: 25, rate: 4500, crf: 21, threads: 2, sub: false },
+        "g2" => Profile { width: 960, fps: 20, rate: 3000, crf: 22, threads: 2, sub: false },
+        // Luồng phụ Dahua thường 352x288 @ 7 fps nhưng có đầu ghi để 640x360 hay 704x576,
+        // nên fps đặt 8–12 chứ không ép xuống 7: rẻ hơn nữa không đáng mà hình giật.
+        "g4" => Profile { width: 640, fps: 12, rate: 1200, crf: 24, threads: 2, sub: true },
+        "g6" => Profile { width: 560, fps: 10, rate: 900, crf: 24, threads: 2, sub: true },
+        "g8" => Profile { width: 448, fps: 10, rate: 900, crf: 24, threads: 1, sub: true },
+        "g10" => Profile { width: 352, fps: 8, rate: 700, crf: 25, threads: 1, sub: true },
         _ => return None,
     })
 }
@@ -248,6 +264,8 @@ impl Hls {
         // 0 = luồng chính, 1 = đọc sâu hơn, 2 = luồng phụ. Mỗi bậc chỉ thử một lần.
         let mut stage: u8 = 0;
         let skey = format!("{}-{}", store.id, ch);
+        // Luồng mặc định của profile: ô lưới lấy luồng phụ, hd lấy luồng chính.
+        let default_sub = u8::from(profile_of(profile).map(|p| p.sub).unwrap_or(false));
         let mut dir;
         loop {
             self.probing.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), Instant::now());
@@ -272,7 +290,6 @@ impl Hls {
             // KHÔNG đổi luồng khi ffmpeg vẫn sống mà chỉ chậm quá ngân sách — kênh chậm
             // (15–20 s mới ra hình) vẫn phải giữ luồng chính, không bị hạ xuống luồng phụ.
             if dead {
-                let cur = self.sub.lock().unwrap_or_else(|e| e.into_inner()).get(&skey).copied().unwrap_or(0);
                 if stage == 0 {
                     // Nhiều đầu ghi trả SPS/PPS chậm: ffmpeg báo "Could not find codec parameters
                     // for stream 0 (Video: h264, none): unspecified size" rồi thoát. Lần thử lại
@@ -285,21 +302,23 @@ impl Hls {
                     println!("[hls] thử lại {key} (đọc sâu hơn)");
                     continue;
                 }
-                if stage == 1 && cur == 0 {
-                    // Có kênh chỉ hỏng LUỒNG CHÍNH trong khi luồng phụ vẫn sống — vd 308 Võ Văn
-                    // Ngân ch7/ch8, 186 Nguyễn Văn Cừ ch1. Thử luồng phụ trước khi báo "Chưa có".
+                if stage == 1 {
+                    // Có kênh chỉ hỏng MỘT luồng: 308 Võ Văn Ngân ch7/ch8 và 186 Nguyễn Văn Cừ
+                    // ch1 hỏng luồng chính nhưng luồng phụ sống. Lưới nay mặc định lấy luồng
+                    // phụ, nên thử luồng còn lại trước khi báo "Chưa có".
                     stage = 2;
-                    self.sub.lock().unwrap_or_else(|e| e.into_inner()).insert(skey.clone(), 1);
+                    let cur = self.sub.lock().unwrap_or_else(|e| e.into_inner())
+                        .get(&skey).copied().unwrap_or(default_sub);
+                    let alt = 1 - cur.min(1);
+                    self.sub.lock().unwrap_or_else(|e| e.into_inner()).insert(skey.clone(), alt);
                     self.fail_until.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
                     self.kill_session(&key);
                     waited = 0;
-                    println!("[hls] {key} hỏng luồng chính → thử luồng phụ (subtype=1)");
+                    println!("[hls] {key} hỏng luồng {cur} → thử luồng {alt} (subtype={alt})");
                     continue;
                 }
-                if cur == 1 {
-                    // luồng phụ cũng không xong: trả về luồng chính cho lần mở sau
-                    self.sub.lock().unwrap_or_else(|e| e.into_inner()).insert(skey.clone(), 0);
-                }
+                // cả hai luồng đều không ra hình: trả về luồng mặc định cho lần mở sau
+                self.sub.lock().unwrap_or_else(|e| e.into_inner()).remove(&skey);
                 self.kill_session(&key);
                 self.fail_until.lock().unwrap_or_else(|e| e.into_inner())
                     .insert(key.clone(), Instant::now() + fail_backoff());
@@ -436,9 +455,11 @@ impl Hls {
         };
         // RTSP-qua-HTTP đi qua đúng cổng web của đầu ghi, không phải cổng RTSP.
         let port = if http_mode { store.port } else { store.rtsp_port };
-        // Kênh hỏng luồng chính (xem playlist_file) thì nhớ dùng luồng phụ.
+        // Ô lưới lấy luồng phụ cho nhẹ (p.sub); kênh từng hỏng luồng nào thì nhớ
+        // luồng còn lại trong `sub` (xem playlist_file).
+        let default_sub = u8::from(p.sub);
         let subtype = self.sub.lock().unwrap_or_else(|e| e.into_inner())
-            .get(&format!("{}-{}", store.id, ch)).copied().unwrap_or(0);
+            .get(&format!("{}-{}", store.id, ch)).copied().unwrap_or(default_sub);
         let url = format!("rtsp://{}:{}@{}:{}/cam/realmonitor?channel={}&subtype={}",
             store.user, store.pass, store.host, port, ch, subtype);
         let mut args: Vec<String> = vec!["-hide_banner".into(), "-loglevel".into(), "error".into()];
@@ -492,9 +513,14 @@ impl Hls {
             // scale_vaapi giữ khung hình trong VRAM; hd giữ nguyên độ phân giải gốc
             if p.width > 0 && p.fps > 0 {
                 args.extend(["-vf".into(), format!("fps={},scale_vaapi=w={}:h=-2", p.fps, p.width)]);
+            } else if p.fps > 0 {
+                args.extend(["-vf".into(), format!("fps={}", p.fps)]);
             }
         } else if p.width > 0 {
-            args.extend(["-vf".into(), format!("scale={}:-2:flags=lanczos,fps={}", p.width, p.fps)]);
+            // không phóng to: luồng phụ chỉ 352x288, scale lên chỉ tốn CPU mà hình vẫn vỡ
+            args.extend(["-vf".into(), format!("scale='min(iw,{})':-2:flags=lanczos,fps={}", p.width, p.fps)]);
+        } else if p.fps > 0 {
+            args.extend(["-vf".into(), format!("fps={}", p.fps)]);
         }
         // (C) lưới dày dùng keyframe 1 giây: ít CPU/bitrate hơn
         let kf = if profile == "g8" || profile == "g10" { "1" } else { "0.5" };

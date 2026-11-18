@@ -460,7 +460,7 @@ async fn api_hls(State(app): State<Arc<App>>, Path((profile, id, ch, file)): Pat
     if !file.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
         return err_res(StatusCode::BAD_REQUEST, "Tên tệp không hợp lệ");
     }
-    let valid = ["hd", "raw", "g2", "g4", "g6", "g8", "g10"];
+    let valid = ["hd", "g2", "g4", "g6", "g8", "g10"];
     let is_pb = profile.starts_with("pb") && profile[2..].chars().all(|c| c.is_ascii_digit());
     if !valid.contains(&profile.as_str()) && !is_pb {
         return err_res(StatusCode::BAD_REQUEST, "Hồ sơ không hợp lệ");

@@ -12,8 +12,6 @@ const state = {
   viewer: { id: null, ch: 1, fallback: null, closing: false, lightFor: null },
   quality: (() => { try { return localStorage.getItem('lilycam.quality') || 'hd'; } catch { return 'hd'; } })(),
   hd: false,
-  raw: (() => { try { return localStorage.getItem('lilycam.raw') === '1'; } catch { return false; } })(),
-  codecs: {},
   soundOn: false,
   // mặc định VỪA KHUNG (thấy đủ hình); chỉ bật "đầy khung" khi người dùng chọn
   fill: (() => { try { return localStorage.getItem('lilycam.fitmode') === 'fill'; } catch { return false; } })(),
@@ -198,8 +196,6 @@ function selectStore(id, keepScroll = false) {
     || 'Kiểm tra DDNS / cổng forward, hoặc cập nhật lại địa chỉ trong nút bút chì.';
 
   renderStores();
-  updateRawButton();
-  if (state.codecs[s.id] === undefined) ensureCodec(s.id);
   renderGrid(s);
   if (!keepScroll) $('#content').scrollTop = 0;
   history.replaceState(null, '', '#' + encodeURIComponent(s.id));
@@ -247,42 +243,7 @@ function toggleTileSound(ch, video, btn) {
 
 
 function hlsProfile() {
-  const s = state.stores.find((x) => x.id === state.currentId);
-  const codec = s ? state.codecs[s.id] : null;
-  return state.raw && codec === 'h264' ? 'raw' : `g${state.layout}`;
-}
-
-async function ensureCodec(id) {
-  if (state.codecs[id] !== undefined) return state.codecs[id];
-  state.codecs[id] = null; // đánh dấu đang dò
-  try {
-    const r = await api('/api/codec/' + encodeURIComponent(id));
-    state.codecs[id] = r.codec || 'unknown';
-  } catch {
-    state.codecs[id] = 'unknown';
-  }
-  updateRawButton();
-  if (state.codecs[id] !== 'h264' && state.raw) {
-    state.raw = false;
-    try { localStorage.setItem('lilycam.raw', '0'); } catch {}
-    updateRawButton();
-    const cur = state.stores.find((x) => x.id === state.currentId);
-    if (cur && cur.id === id) renderGrid(cur);
-  }
-  return state.codecs[id];
-}
-
-function updateRawButton() {
-  const btn = $('#rawToggle');
-  if (!btn) return;
-  const s = state.stores.find((x) => x.id === state.currentId);
-  const codec = s ? state.codecs[s.id] : null;
-  const blocked = codec && codec !== 'h264';
-  btn.disabled = !!blocked;
-  btn.classList.toggle('is-active', state.raw && !blocked);
-  btn.title = blocked
-    ? 'Đầu ghi dùng HEVC — không xem trực tiếp luồng gốc được (trình duyệt không giải mã HEVC)'
-    : 'Xem luồng gốc, không qua xử lý (nhẹ CPU, nặng mạng hơn)';
+  return `g${state.layout}`;
 }
 
 function stopTiles() {
@@ -474,17 +435,20 @@ function renderGrid(s) {
 
     card.append(thumb, foot);
 
-  // rê chuột 0.5s → làm nóng phiên HD để lúc bấm là có hình ngay
+  // rê chuột 0.8s → làm nóng phiên HD để lúc bấm là có hình ngay.
+  // Lưới từ 6 ô trở lên thì KHÔNG làm nóng: rê chuột ngang lưới sẽ mở hàng loạt
+  // phiên HD (mỗi phiên ~35 % CPU) rồi bị đuổi ngay — đó là nguồn tải lớn nhất.
   let warmTimer = null;
   card.addEventListener('pointerenter', () => {
     if (matchMedia('(pointer: coarse)').matches) return;
+    if (state.layout >= 6) return;
     warmTimer = setTimeout(() => {
       const key = `${s.id}:${ch}`;
       if (state.warmed && state.warmed[key] && Date.now() - state.warmed[key] < 30000) return;
       state.warmed = state.warmed || {};
       state.warmed[key] = Date.now();
       fetch(`/api/warm/${encodeURIComponent(s.id)}/${ch}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
-    }, 500);
+    }, 800);
   });
   card.addEventListener('pointerleave', () => clearTimeout(warmTimer));
     const open = () => openViewer(s.id, ch);
@@ -2178,24 +2142,6 @@ $('#backBtn').addEventListener('click', () => {
 $('#menuBtn').addEventListener('click', (e) => {
   e.stopPropagation();
   $('#sidebar').classList.toggle('open');
-});
-
-$('#rawToggle').addEventListener('click', async () => {
-  const s = state.stores.find((x) => x.id === state.currentId);
-  if (!s) return;
-  if (state.raw) {
-    state.raw = false;
-  } else {
-    const codec = await ensureCodec(s.id);
-    if (codec !== 'h264') {
-      toast('Đầu ghi này dùng HEVC — không xem trực tiếp luồng gốc được', true);
-      return;
-    }
-    state.raw = true;
-  }
-  try { localStorage.setItem('lilycam.raw', state.raw ? '1' : '0'); } catch {}
-  updateRawButton();
-  renderGrid(s);
 });
 
 $('#layoutPick').addEventListener('click', (e) => {

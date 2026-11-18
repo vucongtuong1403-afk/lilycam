@@ -69,16 +69,6 @@ Băng thông mỗi ô lưới (đã thu nhỏ sẵn ở server):
 
 Đo thực tế trên i5-14400: 10 ô live cùng lúc ≈ **16–20% CPU** (khoảng 2,5 core), RAM không đáng kể.
 
-### Luồng gốc (nút **Gốc**)
-
-- Bỏ qua bước thu nhỏ: server **copy nguyên luồng** từ đầu ghi → CPU gần như 0,
-  hình nét nhất (1920×1080), nhưng băng thông tăng ~6 lần (≈2,7 Mbps/kênh).
-- Chỉ dùng được với đầu ghi **H.264**. Đầu ghi HEVC sẽ tự tắt nút này
-  (trình duyệt không giải mã được HEVC).
-- Nên bật khi: mạng cửa hàng khoẻ và chỉ xem 2–4 ô.
-
-![Luồng gốc](docs/raw.png)
-
 ### Âm thanh
 
 - Âm thanh G.711 của đầu ghi được chuyển sang **AAC** để trình duyệt phát được.
@@ -144,13 +134,14 @@ lưới của cửa hàng khi mở viewer, cache codec ra `data/codecs.json`, v�
 
 ## 3. Một chế độ hình: luồng chính
 
-Trình xem **luôn mở luồng chính** (`subtype=0`) của đầu ghi — không còn nút HD/Nhẹ phải bấm.
-Lưới 2/4/6/8/10 ô cũng lấy luồng chính, server thu nhỏ sẵn cho vừa ô
-(960 / 720 / 640 / 640 / 560 px; 20 / 20 / 15 / 15 / 12 fps).
+Trình xem (ô phóng to) **luôn mở luồng chính** (`subtype=0`) của đầu ghi — không còn nút HD/Nhẹ phải bấm.
+Lưới nhiều ô lấy **luồng phụ** (`subtype=1`, thường 352×288 @ 7 fps) của đầu ghi: ô chỉ rộng
+~300–450 px nên độ nét không khác, còn CPU server giảm khoảng 4 lần và đầu ghi không bị nghẽn upload.
+Riêng lưới 2 ô vẫn dùng luồng chính (960 px) cho nét.
 
-- HEVC → H.264 bằng ffmpeg `preset veryfast`, `crf 21–25`, thu nhỏ bằng lanczos, có B-frame
-  và `aq-mode=2` (nét, ít nhiễu hơn hẳn cấu hình ultrafast cũ); đầu ghi H.264 thì copy nguyên luồng (CPU ~0).
-  Băng thông tham khảo: ô 720p ~1,5–2,5 Mbps, HD 1080p ~4–6 Mbps.
+- HEVC → H.264 bằng ffmpeg `preset veryfast`, `crf 21–25`, thu nhỏ bằng lanczos (không phóng to),
+  có B-frame và `aq-mode=2` (nét, ít nhiễu hơn hẳn cấu hình ultrafast cũ).
+  Băng thông tham khảo: ô lưới ~0,7–1,2 Mbps, HD 1080p ~4–6 Mbps.
 - Luồng chính không mở được (mạng yếu, đầu ghi từ chối) → ô đó **tự** hiện ảnh/MJPEG rồi
   thử lại luồng chính ở lần sau, không cần bấm gì.
 - Mỗi phiên = 1 tiến trình `bin/ffmpeg` (~0,2 core cho ô 720p, ~0,5–1 core cho HD 1080p).
@@ -242,9 +233,10 @@ Server giữ toàn bộ thông tin đăng nhập camera; trình duyệt chỉ th
 `/api/stream`, `/hls/...`.
 
 Mỗi ô lưới là một phiên HLS riêng (`/hls/g4/...`, `g6`, `g10`…) do server thu nhỏ sẵn;
-ô phóng to dùng `/hls/hd/...` giữ nguyên độ phân giải. Lưới **8–10 ô lấy luồng phụ**
-(`subtype=1`) của đầu ghi — ô chỉ ~300 px nên không cần 1080p, đổi lại CPU server giảm ~3 lần
-và đầu ghi không bị nghẽn upload; đầu ghi nào không có luồng phụ thì tự quay về luồng chính.
+ô phóng to dùng `/hls/hd/...` giữ nguyên độ phân giải. Lưới 4 ô trở lên lấy **luồng phụ**
+(`subtype=1`) của đầu ghi — ô chỉ ~300 px nên không cần 1080p, đổi lại CPU server giảm ~4 lần
+và đầu ghi không bị nghẽn upload; lưới 2 ô dùng luồng chính. Đầu ghi nào không mở được luồng
+phụ thì server tự thử luồng chính rồi nhớ luồng còn sống cho lần sau.
 Tối đa 14 phiên cùng lúc (`MAX_STREAMS`); phiên không ai xem tự tắt sau 2 phút (`IDLE_SECS`).
 
 ---
@@ -341,12 +333,17 @@ Lúc khởi động chương trình tự thử encode 0,2 giây rồi in ra mộ
 Không có GPU thì tự động quay về libx264, không cần sửa gì. Tắt tay bằng `VAAPI: "0"`
 trong `docker-compose.yml`, hoặc đổi thiết bị bằng `VAAPI_DEV`.
 
-Đo trên i5-14400, 12 phiên lưới `g6`:
+Đo trên i5-14400, **6 ô lưới `g6` + 1 ô phóng to `hd`** (luồng phụ 352×288 @ 7 fps):
 
-| | CPU | Nhiệt độ CPU |
+| | CPU cả container | Nhiệt độ CPU |
 |---|---|---|
-| libx264 | ~120–460 % | 80–92 °C |
+| libx264 (không GPU) | **~35 %** (24–68 %) | 52–53 °C |
+| libx264, 6 ô lưới cùng một cơ sở | 141 % (đo 2026-11-18) | 55 °C |
+| libx264 khi lưới lấy luồng chính (trước đây) | 151–371 % | 57–92 °C |
 | VAAPI | **23–45 %** | **38–56 °C** |
+
+Ghi chú: máy này hiện **không có VAAPI** (`/dev/dri/renderD128` là card NVIDIA GT 720,
+trong khi iGPU Intel bị tắt trong BIOS). Bảng trên đo ở chế độ libx264 để so sánh.
 
 Hình ảnh và âm thanh không đổi (vẫn H.264 Main, cùng bitrate); xem lại bản ghi và
 cắt clip cũng dùng GPU.
@@ -360,11 +357,11 @@ Báo cáo mới nhất: [docs/bao-cao-hieu-nang.md](docs/bao-cao-hieu-nang.md) �
 | Ô camera “Không có tín hiệu”, banner đỏ | Đầu ghi mất mạng, DDNS sai, cổng forward đóng. Bấm **Thử lại** hoặc sửa bằng nút bút chì |
 | HD cứ tự về “Nhẹ” | Đầu ghi không mở RTSP 554, mạng yếu, hoặc trình duyệt không có H.264 (Chromium thuần). Dùng Chrome/Edge/Safari |
 | Lần đầu mở HD chậm 4–6 giây | ffmpeg phải dò codec + chờ keyframe; các lần sau nhanh hơn |
-| Máy nóng / CPU cao | Bật VAAPI (xem mục 8) — giảm ~10 lần CPU. Không có GPU thì giảm `MAX_STREAMS` hoặc chọn lưới ít ô |
+| Máy nóng / CPU cao | Bật VAAPI (xem mục 8) — giảm ~10 lần CPU. Không có GPU thì giảm `MAX_STREAMS` hoặc chọn lưới ít ô. Lưới từ 6 ô **không** làm nóng sẵn phiên HD khi rê chuột (mỗi phiên HD ~35 % CPU); muốn phóng to thì bấm vào ô |
 | Nhiệt vẫn cao dù VAAPI | Log có `[thermal] …°C ≥ 80°C (30 s) → giảm còn N phiên`. Watchdog chỉ cắt khi nhiệt ≥ `TEMP_HOT` suốt 30 s và mỗi lần cắt một nửa; hạ `TEMP_HOT` nếu muốn ngưỡng thấp hơn |
 | Máy lag rồi tự khởi động lại, `journalctl -k` có `invoked oom-killer` | Hết RAM do shmem/GPU (i915) chứ không phải nhiệt CPU. Compose phải có `mem_limit: 6g` + `shm_size: 512m` để container tự chết trong cgroup. Kiểm tra: `docker stats lilycam`, `grep Shmem /proc/meminfo` |
 | Mở lưới báo “Chưa có” dù camera sống | Đã đủ `MAX_STREAMS` phiên và mọi phiên đều mới mở. Log có `[hls] đủ 14 phiên, không mở thêm …`; chờ 1–2 phút hoặc tăng `MAX_STREAMS` |
-| Một kênh báo “Chưa có” trong khi các kênh khác cùng đầu ghi vẫn xem được | Kênh đó hỏng luồng chính nhưng còn luồng phụ: server tự chuyển sang luồng phụ (log có `[hls] … hỏng luồng chính → thử luồng phụ (subtype=1)`) và nhớ cho lần mở sau. Hình nét thấp hơn (352×288). Nếu cả hai luồng cùng chết thì kênh không có tín hiệu — kiểm tra camera/nguồn tại chỗ |
+| Một kênh báo “Chưa có” trong khi các kênh khác cùng đầu ghi vẫn xem được | Kênh đó hỏng một luồng nhưng luồng kia còn sống: server tự thử luồng còn lại (log có `[hls] … hỏng luồng 1 → thử luồng 0 (subtype=0)`) và nhớ cho lần mở sau. Nếu cả hai luồng cùng chết thì kênh không có tín hiệu — kiểm tra camera/nguồn tại chỗ |
 | Ảnh chụp (snapshot) trắng hoặc 502 nhưng xem live vẫn được | Sai cổng web của đầu ghi trong `data/cameras.json` (ví dụ cấu hình 8181 nhưng cổng mở là 81). Dò cổng rồi sửa `port`, khởi động lại container |
 | Lưới 10 ô bị giật | Băng thông upload của cửa hàng không đủ 10 luồng — chọn 4 hoặc 6 ô |
 | Ảnh có giờ lệch | Giờ do đầu ghi đóng dấu (OSD), không phải của web — cần chỉnh đồng hồ trên đầu ghi |

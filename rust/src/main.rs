@@ -473,6 +473,8 @@ async fn api_stats(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
         "nodeRssMB": rss_mb(),
         "stores": app.stores.len(),
         "hls": app.hls.stats(),
+        "cpuPct": own_cpu_pct().map(|v| (v * 10.0).round() / 10.0),
+        "cpuTempC": cpu_temp().map(|v| (v * 10.0).round() / 10.0),
         "netsdk": { "enabled": false },
     }))
 }
@@ -1087,18 +1089,65 @@ fn cpu_temp() -> Option<f32> {
     best
 }
 
+/// CPU time (micro giây) mà chính tiến trình này đã dùng, đọc từ cgroup.
+/// Dùng để biết máy nóng là do LilyCam hay do ứng dụng khác.
+fn own_cpu_usec() -> Option<u64> {
+    std::fs::read_to_string("/sys/fs/cgroup/cpu.stat")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("usage_usec ").and_then(|v| v.trim().parse::<u64>().ok()))
+        })
+        .or_else(|| {
+            std::fs::read_to_string("/sys/fs/cgroup/cpuacct/cpuacct.usage")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .map(|ns| ns / 1000)
+        })
+}
+
+/// Mẫu CPU trước đó (usec, thời điểm, % đã tính), để tính % CPU của chính LilyCam.
+static CPU_SAMPLE: std::sync::Mutex<Option<(u64, std::time::Instant, f32)>> = std::sync::Mutex::new(None);
+
+/// % CPU (1 lõi = 100 %) mà LilyCam đã dùng. Cửa sổ dưới 3 giây thì trả lại số cũ,
+/// vì vài giây đầu sau khi khởi động (hoặc ngay sau khi mở phiên) cho số nhảy loạn.
+fn own_cpu_pct() -> Option<f32> {
+    let cur = own_cpu_usec()?;
+    let now = std::time::Instant::now();
+    let mut g = CPU_SAMPLE.lock().ok()?;
+    let mut res = g.map(|(_, _, last)| last);
+    if let Some((p, at, _)) = *g {
+        let dt = now.duration_since(at).as_micros().max(1) as f64;
+        if dt >= 3_000_000.0 {
+            if cur >= p {
+                res = Some(((cur - p) as f64 * 100.0 / dt) as f32);
+            }
+            *g = Some((cur, now, res.unwrap_or(0.0)));
+        }
+    } else {
+        *g = Some((cur, now, 0.0));
+    }
+    res
+}
+
 /// Canh nhiệt: CPU nóng quá thì đóng bớt phiên camera (không ai xem thì không encode).
 fn spawn_thermal(app: Arc<App>) {
-    let hot = std::env::var("TEMP_HOT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(80.0);
-    let cool = std::env::var("TEMP_COOL").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(65.0);
+    let hot = std::env::var("TEMP_HOT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(90.0);
+    let crit = std::env::var("TEMP_CRIT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(92.0);
+    let cool = std::env::var("TEMP_COOL").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(75.0);
+    // Ngưỡng tải của chính LilyCam: dưới mức này thì đóng phiên camera cũng không làm máy nguội,
+    // vì nhiệt đến từ ứng dụng khác (trình duyệt, DSH…). 150 % = 1,5 lõi.
+    let own_hot = std::env::var("TEMP_OWN_CPU").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(150.0);
     tokio::spawn(async move {
         // Đòi 3 mẫu liên tiếp (30 s) mới hành động, và mỗi lần chỉ cắt một nửa số phiên.
         // Trước đây 1 mẫu là cắt thẳng về 2 phiên: một spike 1 giây của một core cũng
         // đủ đóng 16/18 phiên, người dùng mở lại → churn → CPU/GPU vọt → lại spike.
         let mut hits = 0usize;
         let mut last_trim: Option<std::time::Instant> = None;
+        let _ = own_cpu_pct(); // mồi mẫu đầu để lần sau tính được chênh lệch
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            let own_pct = own_cpu_pct().unwrap_or(0.0);
             let t = match cpu_temp() { Some(t) => t, None => continue };
             let n = app.hls.count();
             if t >= hot {
@@ -1107,13 +1156,14 @@ fn spawn_thermal(app: Arc<App>) {
                 hits = 0;
                 if t <= cool { continue; }
             }
-            if hits >= 3 && n > 2 {
+            // Nóng do ứng dụng khác: chỉ cắt khi thật sự nguy hiểm (≥ TEMP_CRIT).
+            if hits >= 3 && n > 2 && (own_pct >= own_hot || t >= crit) {
                 if last_trim.map_or(true, |x: std::time::Instant| x.elapsed() > std::time::Duration::from_secs(60)) {
                     let keep = (n / 2).max(2);
                     app.hls.trim_to(keep);
                     last_trim = Some(std::time::Instant::now());
                     hits = 0;
-                    println!("[thermal] {t:.0}°C ≥ {hot:.0}°C (30 s) → giảm còn {keep} phiên");
+                    println!("[thermal] {t:.0}°C ≥ {hot:.0}°C (30 s), LilyCam dùng {own_pct:.0}% CPU → giảm còn {keep} phiên");
                 }
             }
         }
